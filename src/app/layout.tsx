@@ -18,8 +18,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="id">
-      <body className={`${plusJakartaSans.variable} font-sans min-h-screen bg-background`}>
+    <html lang="id" suppressHydrationWarning>
+      <body className={`${plusJakartaSans.variable} font-sans min-h-screen bg-background`} suppressHydrationWarning>
         {children}
       </body>
     </html>

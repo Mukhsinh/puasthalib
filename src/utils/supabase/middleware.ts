@@ -6,59 +6,61 @@ export async function updateSession(request: NextRequest) {
         request,
     })
 
-    const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-            cookies: {
-                getAll() {
-                    return request.cookies.getAll()
-                },
-                setAll(cookiesToSet) {
-                    cookiesToSet.forEach(({ name, value, options }) => request.cookies.set(name, value))
-                    supabaseResponse = NextResponse.next({
-                        request,
-                    })
-                    cookiesToSet.forEach(({ name, value, options }) =>
-                        supabaseResponse.cookies.set(name, value, options)
-                    )
-                },
-            },
+    // ONLY perform Supabase Auth API call if user is accessing protected /admin routes
+    if (request.nextUrl.pathname.startsWith('/admin')) {
+        const allCookies = request.cookies.getAll()
+        const hasAuthCookie = allCookies.some(c =>
+            c.name.includes('auth-token') ||
+            c.name.startsWith('sb-') ||
+            c.name.includes('supabase')
+        )
+
+        // If no auth cookie exists at all, redirect to /login
+        if (!hasAuthCookie) {
+            const url = request.nextUrl.clone()
+            url.pathname = '/login'
+            return NextResponse.redirect(url)
         }
-    )
 
-    // Do not run code between createServerClient and
-    // supabase.auth.getUser(). A simple mistake could make it very hard to debug
-    // issues with users being randomly logged out.
+        try {
+            const supabase = createServerClient(
+                process.env.NEXT_PUBLIC_SUPABASE_URL!,
+                process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+                {
+                    cookies: {
+                        getAll() {
+                            return request.cookies.getAll()
+                        },
+                        setAll(cookiesToSet) {
+                            cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
+                            supabaseResponse = NextResponse.next({
+                                request,
+                            })
+                            cookiesToSet.forEach(({ name, value, options }) =>
+                                supabaseResponse.cookies.set(name, value, options)
+                            )
+                        },
+                    },
+                }
+            )
 
-    // IMPORTANT: DO NOT REMOVE auth.getUser()
+            const {
+                data: { user },
+            } = await supabase.auth.getUser()
 
-    const {
-        data: { user },
-    } = await supabase.auth.getUser()
-
-    if (
-        !user &&
-        request.nextUrl.pathname.startsWith('/admin')
-    ) {
-        // no user, potentially respond by redirecting the user to the login page
-        const url = request.nextUrl.clone()
-        url.pathname = '/login'
-        return NextResponse.redirect(url)
+            // If user is null and no valid session is found, redirect to login
+            if (!user) {
+                const { data: { session } } = await supabase.auth.getSession()
+                if (!session) {
+                    const url = request.nextUrl.clone()
+                    url.pathname = '/login'
+                    return NextResponse.redirect(url)
+                }
+            }
+        } catch (error) {
+            console.error("Middleware auth check ignored error:", error)
+        }
     }
-
-    // IMPORTANT: You *must* return the supabaseResponse object as it is.
-    // If you're creating a new response object with NextResponse.next() make sure to:
-    // 1. Pass the request in it, like so:
-    //    const myNewResponse = NextResponse.next({ request })
-    // 2. Copy over the cookies, like so:
-    //    myNewResponse.cookies.setAll(supabaseResponse.cookies.getAll())
-    // 3. Change the myNewResponse object to fit your needs, but avoid changing
-    //    the cookies!
-    // 4. Finally:
-    //    return myNewResponse
-    // If this is not done, you may be causing the browser and server to go out
-    // of sync and terminate the user's session prematurely!
 
     return supabaseResponse
 }

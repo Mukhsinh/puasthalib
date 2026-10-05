@@ -6,6 +6,7 @@ import { createClient } from '@/utils/supabase/client'
 import { useRouter } from 'next/navigation'
 import { cn } from '@/utils/cn'
 import { motion, AnimatePresence } from 'framer-motion'
+import { generateSystemOverviewPDF } from '@/utils/pdfExport'
 
 const DEFAULT_SETTINGS = {
     nama_instansi: 'Pemerintah Kota Sejahtera',
@@ -22,10 +23,12 @@ const DEFAULT_SETTINGS = {
     sla_normal_warning: '18',
     sla_high_limit: '4',
     sla_high_warning: '2',
-    // Print
+    // Print & Footer
     print_header: 'PEMERINTAH KOTA SEJAHTERA\nDINAS KESEHATAN\nRUMAH SAKIT UMUM DAERAH KOTA SEJAHTERA',
     print_footer: 'Dokumen ini digenerate secara otomatis oleh Sistem PUAS.\nDicetak secara sah. Segala pemalsuan akan diproses secara hukum.',
+    app_footer_text: 'PINTAR PUAS @2026. Mukhsin Hadi. All Right Reserved.',
     app_name: 'PUAS',
+    app_logo: '',
 }
 
 const InputField = ({ value, onChange, label, icon: Icon, placeholder, type = 'text', hint }: { value: string, onChange: (val: string) => void, label: string, icon?: any, placeholder?: string, type?: string, hint?: string }) => (
@@ -75,11 +78,11 @@ export default function AdminSettingsPage() {
         const fetchSettingsAndCheckAuth = async () => {
             const supabase = createClient()
             const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return router.push('/login')
-
-            const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
-            if (profile?.role === 'user') {
-                return router.push('/admin/tiket')
+            if (session) {
+                const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
+                if (profile?.role === 'user') {
+                    return router.push('/admin/tiket')
+                }
             }
 
             const { data } = await supabase.from('app_settings').select('*')
@@ -104,23 +107,78 @@ export default function AdminSettingsPage() {
         setSettings(prev => ({ ...prev, [key]: value }))
     }
 
-    const handleSave = async () => {
+    const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file) return
+        if (file.size > 5 * 1024 * 1024) {
+            alert('Ukuran file maksimal 5MB')
+            return
+        }
+        const reader = new FileReader()
+        reader.onload = (event) => {
+            const img = new Image()
+            img.onload = () => {
+                const canvas = document.createElement('canvas')
+                const maxDim = 250
+                let width = img.width
+                let height = img.height
+                if (width > height) {
+                    if (width > maxDim) {
+                        height = Math.round((height * maxDim) / width)
+                        width = maxDim
+                    }
+                } else {
+                    if (height > maxDim) {
+                        width = Math.round((width * maxDim) / height)
+                        height = maxDim
+                    }
+                }
+                canvas.width = width
+                canvas.height = height
+                const ctx = canvas.getContext('2d')
+                if (ctx) {
+                    ctx.drawImage(img, 0, 0, width, height)
+                    const compressedDataUrl = canvas.toDataURL('image/png')
+                    handleChange('app_logo', compressedDataUrl)
+                }
+            }
+            img.src = event.target?.result as string
+        }
+        reader.readAsDataURL(file)
+    }
+
+    const handleSave = async (e?: React.MouseEvent) => {
+        if (e) e.preventDefault()
         setIsSaving(true)
         setSaveStatus('idle')
         const supabase = createClient()
 
         try {
-            // Upsert each setting key-value pair
-            const upsertPromises = Object.entries(settings).map(async ([key, value]) => {
-                const { data: existing } = await supabase.from('app_settings').select('id').eq('setting_key', key).single()
-                if (existing) {
-                    return supabase.from('app_settings').update({ setting_value: value, updated_at: new Date().toISOString() }).eq('id', existing.id)
-                } else {
-                    return supabase.from('app_settings').insert({ setting_key: key, setting_value: value })
+            // Upsert each setting key-value pair cleanly
+            for (const [key, value] of Object.entries(settings)) {
+                if (value !== undefined && value !== null) {
+                    const { data: existing } = await supabase
+                        .from('app_settings')
+                        .select('id')
+                        .eq('setting_key', key)
+                        .maybeSingle()
+
+                    if (existing) {
+                        await supabase
+                            .from('app_settings')
+                            .update({ setting_value: String(value), updated_at: new Date().toISOString() })
+                            .eq('id', existing.id)
+                    } else {
+                        await supabase
+                            .from('app_settings')
+                            .insert({ setting_key: key, setting_value: String(value) })
+                    }
                 }
-            })
-            await Promise.all(upsertPromises)
+            }
             setSaveStatus('success')
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('app_settings_updated'))
+            }
         } catch (error) {
             console.error("Error saving settings:", error)
             setSaveStatus('error')
@@ -130,10 +188,18 @@ export default function AdminSettingsPage() {
         }
     }
 
+    const handleDownloadSystemReport = () => {
+        generateSystemOverviewPDF({
+            appSettings: settings,
+            printDate: new Date().toISOString()
+        })
+    }
+
     const MENUS = [
         { id: 'Identitas', icon: Building, desc: 'Profil Institusi', color: 'text-indigo-500 bg-indigo-50' },
         { id: 'SLA & Eskalasi', icon: Clock, desc: 'Batas waktu & peringatan', color: 'text-amber-500 bg-amber-50' },
         { id: 'Format Laporan', icon: FileText, desc: 'Kop surat & tanda tangan', color: 'text-emerald-500 bg-emerald-50' },
+        { id: 'Dokumentasi', icon: ShieldCheck, desc: 'Unduh panduan & gambaran', color: 'text-blue-500 bg-blue-50' },
     ]
 
     if (!isLoaded) {
@@ -328,15 +394,40 @@ export default function AdminSettingsPage() {
                                 {/* Logo */}
                                 <div className="pt-6 border-t border-slate-100">
                                     <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm">
-                                        <Building className="w-4 h-4 text-primary" /> Logo Instansi
+                                        <Building className="w-4 h-4 text-primary" /> Logo Instansi / Aplikasi
                                     </h3>
-                                    <div className="flex items-center gap-6">
-                                        <div className="w-20 h-20 bg-gradient-to-br from-slate-100 to-slate-50 border-2 border-dashed border-slate-200 rounded-2xl flex items-center justify-center font-bold text-slate-300 text-3xl overflow-hidden">
-                                            {settings.nama_sub_instansi ? settings.nama_sub_instansi.charAt(0).toUpperCase() : 'R'}
+                                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                                        <div className="w-24 h-24 bg-gradient-to-br from-slate-100 to-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex items-center justify-center font-bold text-slate-400 text-3xl overflow-hidden shadow-inner relative group">
+                                            {settings.app_logo ? (
+                                                <img src={settings.app_logo} alt="Logo Instansi" className="w-full h-full object-cover" />
+                                            ) : settings.nama_sub_instansi ? (
+                                                settings.nama_sub_instansi.charAt(0).toUpperCase()
+                                            ) : (
+                                                'R'
+                                            )}
                                         </div>
-                                        <div>
-                                            <input type="file" className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-5 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-primary/5 file:text-primary hover:file:bg-primary/10 cursor-pointer transition-colors" />
-                                            <p className="text-[10px] text-slate-400 mt-2 font-medium flex items-center gap-1"><AlertCircle className="w-3 h-3" /> Maks. 2MB. Format: SVG / PNG transparan.</p>
+                                        <div className="space-y-3">
+                                            <label className="inline-flex items-center gap-2 px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer transition-colors border border-slate-200">
+                                                <span>Pilih File Logo Baru</span>
+                                                <input
+                                                    type="file"
+                                                    accept="image/*"
+                                                    onChange={handleLogoUpload}
+                                                    className="hidden"
+                                                />
+                                            </label>
+                                            {settings.app_logo && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleChange('app_logo', '')}
+                                                    className="block text-xs font-bold text-red-500 hover:underline"
+                                                >
+                                                    Hapus Logo Saat Ini
+                                                </button>
+                                            )}
+                                            <p className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
+                                                <AlertCircle className="w-3 h-3 shrink-0" /> Maksimal 2MB. Format PNG, SVG, atau JPG.
+                                            </p>
                                         </div>
                                     </div>
                                 </div>
@@ -430,15 +521,23 @@ export default function AdminSettingsPage() {
                                     </div>
                                 </div>
 
-                                <div className="pt-6 border-t border-slate-100">
+                                <div className="pt-6 border-t border-slate-100 space-y-6">
                                     <TextAreaField
                                         value={settings.print_footer || ''}
                                         onChange={(val) => handleChange('print_footer', val)}
-                                        label="Catatan Kaki (Footer)"
+                                        label="Catatan Kaki Laporan (Footer Dokumen Cetak/PDF)"
                                         placeholder="Dokumen ini digenerate secara otomatis oleh Sistem..."
                                         rows={3}
-                                        positionHint="Posisi: Bawah Halaman"
-                                        hint="Teks ini akan muncul di bagian bawah setiap halaman laporan yang dicetak."
+                                        positionHint="Posisi: Bawah Dokumen PDF/Cetak"
+                                        hint="Teks ini akan muncul di bagian bawah setiap halaman laporan PDF yang dicetak."
+                                    />
+
+                                    <InputField
+                                        value={settings.app_footer_text || ''}
+                                        onChange={(val) => handleChange('app_footer_text', val)}
+                                        label="Teks Footer Halaman Aplikasi (Website Footer)"
+                                        placeholder="PINTAR PUAS @2026. Mukhsin Hadi. All Right Reserved."
+                                        hint="Teks ini akan muncul di bagian footer bawah seluruh halaman web aplikasi."
                                     />
                                 </div>
 
@@ -459,6 +558,70 @@ export default function AdminSettingsPage() {
                                         <div className="border-b-2 border-slate-800 pt-2 mx-auto w-4/5" />
                                         <div className="border-b border-slate-800 pt-0.5 mx-auto w-4/5" />
                                         <p className="text-[10px] text-slate-400 pt-4 font-medium">{settings.alamat_instansi || 'Alamat belum diatur'}</p>
+                                    </div>
+                                </div>
+                            </motion.div>
+                        )}
+
+                        {/* ===== DOKUMENTASI & LAPORAN SISTEM ===== */}
+                        {activeMenu === 'Dokumentasi' && (
+                            <motion.div
+                                key="dokumentasi"
+                                initial={{ opacity: 0, x: 10 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: -10 }}
+                                transition={{ duration: 0.2 }}
+                                className="bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 space-y-8"
+                            >
+                                <div>
+                                    <h2 className="text-xl font-black text-slate-800">Dokumentasi & Laporan Sistem</h2>
+                                    <p className="text-sm text-slate-500 font-medium mt-1">Unduh dokumen resmi gambaran umum aplikasi, petunjuk penggunaan (manual book), dan struktur menu secara profesional.</p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                                    <div className="space-y-6">
+                                        <div className="bg-slate-50 rounded-2xl p-6 border border-slate-100">
+                                            <div className="flex items-center gap-4 mb-4">
+                                                <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center text-blue-600">
+                                                    <FileText className="w-6 h-6" />
+                                                </div>
+                                                <div>
+                                                    <h3 className="font-bold text-slate-800">Laporan Gambaran Umum</h3>
+                                                    <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Format: PDF Professional</p>
+                                                </div>
+                                            </div>
+                                            <p className="text-xs text-slate-500 leading-relaxed mb-6 font-medium">
+                                                Dokumen ini berisi profil institusi, visi misi sistem, fitur utama, struktur menu admin & publik, serta panduan singkat penggunaan aplikasi untuk pelapor dan petugas.
+                                            </p>
+                                            <button
+                                                onClick={handleDownloadSystemReport}
+                                                className="w-full py-3 bg-white border-2 border-blue-600 text-blue-600 font-bold rounded-xl hover:bg-blue-600 hover:text-white transition-all flex items-center justify-center gap-2"
+                                            >
+                                                <FileText className="w-4 h-4" /> Unduh Laporan Sistem
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <div className="relative overflow-hidden group rounded-2xl border border-slate-100 p-8 flex flex-col items-center justify-center text-center space-y-4 bg-gradient-to-br from-indigo-50/50 to-white">
+                                        <div className="w-16 h-16 bg-white shadow-xl shadow-indigo-100 rounded-2xl flex items-center justify-center text-indigo-500 mb-2">
+                                            <ShieldCheck className="w-8 h-8" />
+                                        </div>
+                                        <h4 className="font-black text-slate-800 uppercase tracking-tighter">Sistematika Profesional</h4>
+                                        <p className="text-xs text-slate-500 font-medium">Laporan akan dibuat secara dinamis menyesuaikan pengaturan identitas instansi yang telah Anda simpan di sistem.</p>
+                                        <div className="flex gap-1.5">
+                                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-bold rounded-full">COVER</span>
+                                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-bold rounded-full">MANUAL</span>
+                                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-600 text-[9px] font-bold rounded-full">FITUR</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="pt-6 border-t border-slate-100">
+                                    <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl flex gap-3 items-start">
+                                        <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                                        <div className="text-xs text-amber-800 font-medium leading-relaxed">
+                                            <strong>Tips:</strong> Untuk hasil terbaik, pastikan Anda telah mengisi <strong>Identitas Institusi</strong> dan <strong>Kop Surat</strong> dengan benar sebelum mengunduh laporan ini agar data yang tertera akurat.
+                                        </div>
                                     </div>
                                 </div>
                             </motion.div>

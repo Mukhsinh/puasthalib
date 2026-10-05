@@ -10,6 +10,7 @@ import {
 import { motion } from 'framer-motion'
 import * as xlsx from 'xlsx'
 import { generateFormalPDF } from '@/utils/pdfExport'
+import { fetchAppSettings } from '@/utils/appSettings'
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316']
 
@@ -34,7 +35,8 @@ export default function AdminAnalisaPage() {
         kop_nama: 'Pemerintah Kota Sejahtera',
         kop_rs: 'Rumah Sakit Umum Daerah',
         kop_alamat: 'Jl. Jend. Sudirman No. 123',
-        kop_kontak: 'Email: rsud@sejahtera.go.id | Website: rsud.sejahtera.go.id'
+        kop_kontak: 'Email: rsud@sejahtera.go.id | Website: rsud.sejahtera.go.id',
+        app_logo: ''
     })
     const [isGenerating, setIsGenerating] = useState(false)
 
@@ -66,19 +68,16 @@ export default function AdminAnalisaPage() {
             const { data: unitsData } = await unitQuery
             setUnits(unitsData || [])
 
-            const { data: allSettings } = await supabase.from('app_settings').select('setting_key, setting_value')
-            if (allSettings) {
-                const settingsMap: Record<string, string> = {}
-                allSettings.forEach((s: any) => { settingsMap[s.setting_key] = s.setting_value })
-                setAppSettings({
-                    kop_nama: settingsMap['nama_instansi'] || 'Pemerintah Kota Sejahtera',
-                    kop_rs: settingsMap['nama_sub_instansi'] || 'Rumah Sakit Umum Daerah',
-                    kop_alamat: settingsMap['alamat_instansi'] || 'Jl. Jend. Sudirman No. 123',
-                    kop_kontak: settingsMap['kontak_instansi'] || 'Telp/Email'
-                })
-                setSignerName(settingsMap['nama_penandatangan'] || 'Dr. Mulyadi Saputra, MARS')
-                setSignerRole(settingsMap['jabatan_penandatangan'] || 'Direktur Utama RSUD Kota Sejahtera')
-            }
+            const settings = await fetchAppSettings(supabase)
+            setAppSettings({
+                kop_nama: settings.kop_nama,
+                kop_rs: settings.kop_rs,
+                kop_alamat: settings.kop_alamat,
+                kop_kontak: settings.kop_kontak,
+                app_logo: settings.app_logo
+            })
+            setSignerName(settings.nama_penandatangan)
+            setSignerRole(settings.jabatan_penandatangan)
             initialFetchDone.current = true
             fetchTicketsData(role, profileUnitId)
         }

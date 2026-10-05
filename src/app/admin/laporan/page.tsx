@@ -7,6 +7,7 @@ import { createClient } from '@/utils/supabase/client'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell } from 'recharts'
 import { motion } from 'framer-motion'
 import { generateFormalPDF } from '@/utils/pdfExport'
+import { fetchAppSettings } from '@/utils/appSettings'
 
 export default function LaporanEksportPage() {
     const [isGenerating, setIsGenerating] = useState(false)
@@ -22,7 +23,7 @@ export default function LaporanEksportPage() {
     const [printDate, setPrintDate] = useState(new Date().toISOString().slice(0, 10))
     const [signerName, setSignerName] = useState('')
     const [signerRole, setSignerRole] = useState('')
-    const [appSettings, setAppSettings] = useState({ kop_nama: 'Pemerintah Kota Sejahtera', kop_rs: 'Rumah Sakit Umum Daerah', kop_alamat: 'Jl. Jend. Sudirman No. 123, Telepon: (021) 555-0192', kop_kontak: 'Email: rsud@sejahtera.go.id | Website: rsud.sejahtera.go.id' })
+    const [appSettings, setAppSettings] = useState({ kop_nama: 'Pemerintah Kota Sejahtera', kop_rs: 'Rumah Sakit Umum Daerah', kop_alamat: 'Jl. Jend. Sudirman No. 123, Telepon: (021) 555-0192', kop_kontak: 'Email: rsud@sejahtera.go.id | Website: rsud.sejahtera.go.id', app_logo: '' })
 
     useEffect(() => {
         const fetchData = async () => {
@@ -52,23 +53,17 @@ export default function LaporanEksportPage() {
             const { data: unitsData } = await unitQuery
             if (unitsData) setUnits(unitsData)
 
-            // 2. Fetch app settings (key-value pairs)
-            const { data: allSettings } = await supabase.from('app_settings').select('setting_key, setting_value')
-            if (allSettings) {
-                const settingsMap: Record<string, string> = {}
-                allSettings.forEach((s: any) => { settingsMap[s.setting_key] = s.setting_value })
-                setAppSettings({
-                    kop_nama: settingsMap['nama_instansi'] || 'Pemerintah Kota Sejahtera',
-                    kop_rs: settingsMap['nama_sub_instansi'] || 'Rumah Sakit Umum Daerah',
-                    kop_alamat: settingsMap['alamat_instansi'] || 'Jl. Jend. Sudirman No. 123',
-                    kop_kontak: settingsMap['kontak_instansi'] || 'Telp/Email'
-                })
-                setSignerName(settingsMap['nama_penandatangan'] || 'Dr. Mulyadi Saputra, MARS')
-                setSignerRole(settingsMap['jabatan_penandatangan'] || 'Direktur Utama RSUD Kota Sejahtera')
-            } else {
-                setSignerName('Dr. Mulyadi Saputra, MARS')
-                setSignerRole('Direktur Utama RSUD Kota Sejahtera')
-            }
+            // 2. Fetch app settings
+            const settings = await fetchAppSettings(supabase)
+            setAppSettings({
+                kop_nama: settings.kop_nama,
+                kop_rs: settings.kop_rs,
+                kop_alamat: settings.kop_alamat,
+                kop_kontak: settings.kop_kontak,
+                app_logo: settings.app_logo
+            })
+            setSignerName(settings.nama_penandatangan)
+            setSignerRole(settings.jabatan_penandatangan)
 
             // 3. Fetch all tickets
             let ticketQuery = supabase.from('tickets').select('*, units!unit_id(nama)').order('created_at', { ascending: false })

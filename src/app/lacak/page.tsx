@@ -4,6 +4,7 @@ import React, { useState, useEffect, Suspense } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { ChevronLeft, Search, CheckCircle2, Clock, MapPin, Inbox, ShieldCheck, Copy, Phone, MessageCircle, ArrowUpRight, FileText, Building2, History as HistoryIcon, Download, FileDown, MessageSquareQuote, MessageSquare } from 'lucide-react'
 import { generateFormalPDF } from '@/utils/pdfExport'
+import { fetchAppSettings } from '@/utils/appSettings'
 import Link from 'next/link'
 import BottomNav from '@/components/BottomNav'
 import AppFooter from '@/components/AppFooter'
@@ -42,30 +43,28 @@ function LacakContent() {
         kop_alamat: '',
         kop_kontak: '',
         nama_penandatangan: '',
-        jabatan_penandatangan: ''
+        jabatan_penandatangan: '',
+        app_logo: ''
     })
 
     // Simulation: Auto search if param exists
     useEffect(() => {
         // Fetch whatsapp kontak from settings
-        const fetchSettings = async () => {
+        const loadSettings = async () => {
             const supabase = createClient()
-            const { data } = await supabase.from('app_settings').select('setting_key, setting_value')
-            if (data) {
-                const map: any = {}
-                data.forEach(s => map[s.setting_key] = s.setting_value)
-                setWhatsappKontak(map.whatsapp_kontak || '')
-                setAppSettings({
-                    kop_nama: map.nama_instansi || 'Pemerintah Kota Pekalongan',
-                    kop_rs: map.nama_sub_instansi || 'RSUD Bendan Kota Pekalongan',
-                    kop_alamat: map.alamat_instansi || 'Jl. Sriwijaya No. 2, Pekalongan',
-                    kop_kontak: map.kontak_instansi || 'Telp: (0285) 437222',
-                    nama_penandatangan: map.nama_penandatangan || 'dr. Dwi Heri Wibawa, M.Kes',
-                    jabatan_penandatangan: map.jabatan_penandatangan || 'Direktur'
-                })
-            }
+            const settings = await fetchAppSettings(supabase)
+            setWhatsappKontak(settings.whatsapp_kontak)
+            setAppSettings({
+                kop_nama: settings.kop_nama,
+                kop_rs: settings.kop_rs,
+                kop_alamat: settings.kop_alamat,
+                kop_kontak: settings.kop_kontak,
+                nama_penandatangan: settings.nama_penandatangan,
+                jabatan_penandatangan: settings.jabatan_penandatangan,
+                app_logo: settings.app_logo
+            })
         }
-        fetchSettings()
+        loadSettings()
         if (initialNomor) handleSearch(undefined, initialNomor)
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])

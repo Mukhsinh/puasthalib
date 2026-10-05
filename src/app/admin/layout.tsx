@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import {
     LayoutDashboard,
     Inbox,
@@ -16,35 +16,43 @@ import {
     Building2,
     FileText,
     PieChart,
-    Bell
+    Bell,
+    ChevronRight,
+    ShieldCheck,
+    Sparkles,
+    Search,
+    CheckCircle2,
+    Layers
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
+import { createClient } from '@/utils/supabase/client'
+import { motion, AnimatePresence } from 'framer-motion'
 
 const SIDEBAR_MENUS = [
     {
-        group: 'Utama', items: [
-            { name: 'Dasbor', href: '/admin', icon: LayoutDashboard },
-            { name: 'Tiket & Laporan', href: '/admin/tiket', icon: Inbox },
+        group: 'Utama',
+        items: [
+            { name: 'Dasbor', href: '/admin', icon: LayoutDashboard, badge: null },
+            { name: 'Tiket & Laporan', href: '/admin/tiket', icon: Inbox, badge: 'Realtime' },
         ]
     },
     {
-        group: 'Analitik', items: [
-            { name: 'Analisa Data', href: '/admin/analisa', icon: BarChart3 },
-            { name: 'Analisis Kepuasan', href: '/admin/analisis-kepuasan', icon: PieChart },
-            { name: 'Laporan', href: '/admin/laporan', icon: FileText },
+        group: 'Analitik & Performa',
+        items: [
+            { name: 'Analisa Data', href: '/admin/analisa', icon: BarChart3, badge: null },
+            { name: 'Analisis Kepuasan', href: '/admin/analisis-kepuasan', icon: PieChart, badge: 'IKM' },
+            { name: 'Laporan Ekskutif', href: '/admin/laporan', icon: FileText, badge: null },
         ]
     },
     {
-        group: 'Konfigurasi', items: [
-            { name: 'Master Unit', href: '/admin/unit', icon: Building2 },
-            { name: 'Master Pengguna', href: '/admin/pengguna', icon: Users },
-            { name: 'Pengaturan Sistem', href: '/admin/pengaturan', icon: Settings },
+        group: 'Konfigurasi Sistem',
+        items: [
+            { name: 'Master Unit Kerja', href: '/admin/unit', icon: Building2, badge: null },
+            { name: 'Master Pengguna', href: '/admin/pengguna', icon: Users, badge: null },
+            { name: 'Pengaturan Sistem', href: '/admin/pengaturan', icon: Settings, badge: null },
         ]
     }
 ]
-
-import { useRouter } from 'next/navigation'
-import { createClient } from '@/utils/supabase/client'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
     const [isMobileOpen, setIsMobileOpen] = useState(false)
@@ -52,25 +60,46 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     const [notifications, setNotifications] = useState<any[]>([])
     const [isNotifOpen, setIsNotifOpen] = useState(false)
     const [appName, setAppName] = useState('PUAS')
+    const [appLogo, setAppLogo] = useState('')
+    const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false)
+
     const pathname = usePathname()
     const router = useRouter()
+    const supabase = React.useMemo(() => createClient(), [])
 
     useEffect(() => {
-        const setup = async () => {
-            const supabase = createClient()
+        const fetchUserData = async () => {
             const { data: { session } } = await supabase.auth.getSession()
             if (!session?.user) return
 
-            // 1. Fetch Profile
-            const { data: profile } = await supabase.from('profiles').select('*, units!unit_id(nama)').eq('id', session.user.id).single()
+            // 1. Profile
+            const { data: profile } = await supabase
+                .from('profiles')
+                .select('*, units!unit_id(nama)')
+                .eq('id', session.user.id)
+                .single()
             if (profile) setUserProfile(profile)
 
-            // 2. Fetch App Name
-            const { data: settingsData } = await supabase.from('app_settings').select('setting_key, setting_value').eq('setting_key', 'app_name').single()
-            if (settingsData?.setting_value) setAppName(settingsData.setting_value)
+            // 2. Settings (app_name + app_logo)
+            const { data: settingsArr } = await supabase
+                .from('app_settings')
+                .select('setting_key, setting_value')
+                .in('setting_key', ['app_name', 'app_logo'])
+            if (settingsArr) {
+                settingsArr.forEach((s: any) => {
+                    if (s.setting_key === 'app_name' && s.setting_value) setAppName(s.setting_value)
+                    if (s.setting_key === 'app_logo' && s.setting_value) setAppLogo(s.setting_value)
+                })
+            }
 
-            // 3. Fetch Initial Notifications
-            let notifQuery = supabase.from('notifications').select('*').eq('status_baca', false).order('created_at', { ascending: false }).limit(20)
+            // 3. Notifications
+            let notifQuery = supabase
+                .from('notifications')
+                .select('*')
+                .eq('status_baca', false)
+                .order('created_at', { ascending: false })
+                .limit(20)
+
             const effectiveProfile = profile || { role: 'user', unit_id: null }
             if (effectiveProfile.role !== 'superadmin' && effectiveProfile.role !== 'admin' && effectiveProfile.unit_id) {
                 notifQuery = notifQuery.eq('unit_id', effectiveProfile.unit_id)
@@ -78,15 +107,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             const { data: notifData } = await notifQuery
             setNotifications(notifData || [])
         }
-        setup()
-    }, [])
+
+        fetchUserData()
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+            if (!session && _event === 'SIGNED_OUT') {
+                router.push('/login')
+            }
+        })
+
+        return () => {
+            subscription.unsubscribe()
+        }
+    }, [router, supabase])
 
     useEffect(() => {
         if (!userProfile) return
-        const supabase = createClient()
 
-        // 4. Subscribe to Realtime Notifications
-        const channel = supabase.channel('notifications-realtime')
+        const channel = supabase.channel('notifications-realtime-layout')
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notifications' }, (payload: any) => {
                 const newNotif = payload.new
                 const role = userProfile.role
@@ -101,10 +139,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         return () => {
             supabase.removeChannel(channel)
         }
-    }, [userProfile])
+    }, [userProfile, supabase])
 
     const handleMarkAllRead = async () => {
-        const supabase = createClient()
         const ids = notifications.map(n => n.id)
         if (ids.length === 0) return
         await supabase.from('notifications').update({ status_baca: true }).in('id', ids)
@@ -113,7 +150,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
 
     const handleOpenNotification = async (notif: any) => {
-        const supabase = createClient()
         await supabase.from('notifications').update({ status_baca: true }).eq('id', notif.id)
         setNotifications(prev => prev.filter(n => n.id !== notif.id))
         setIsNotifOpen(false)
@@ -121,59 +157,105 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
 
     const handleLogout = async () => {
-        const supabase = createClient()
         await supabase.auth.signOut()
         router.push('/login')
     }
 
     return (
-        <div className="min-h-screen bg-slate-50 flex">
+        <div className="min-h-screen bg-slate-100 text-slate-800 flex font-sans antialiased selection:bg-blue-600 selection:text-white">
             {/* Mobile Sidebar Overlay */}
-            {isMobileOpen && (
-                <div
-                    className="fixed inset-0 bg-slate-900/50 z-40 lg:hidden"
-                    onClick={() => setIsMobileOpen(false)}
-                />
-            )}
+            <AnimatePresence>
+                {isMobileOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-40 lg:hidden"
+                        onClick={() => setIsMobileOpen(false)}
+                    />
+                )}
+            </AnimatePresence>
 
-            {/* Sidebar */}
+            {/* Sidebar (MATTE DARK EMERALD GREEN APPROACHING BLACK) */}
             <aside className={cn(
-                "fixed inset-y-0 left-0 z-50 w-72 bg-slate-900 text-slate-300 transition-transform duration-300 lg:translate-x-0 lg:static lg:block flex flex-col",
+                "fixed inset-y-0 left-0 z-50 w-72 bg-[#042017] text-white transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:block flex flex-col shadow-xl border-r border-emerald-900/40 shrink-0",
                 isMobileOpen ? "translate-x-0" : "-translate-x-full"
             )}>
-                <div className="h-16 flex items-center px-6 bg-slate-950 border-b border-slate-800">
-                    <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center text-white font-bold mr-3">{appName.charAt(0)}</div>
-                    <span className="text-lg font-bold text-white tracking-wide">{appName} Admin</span>
-                    <button className="ml-auto lg:hidden" onClick={() => setIsMobileOpen(false)}>
-                        <X className="w-6 h-6" />
+                {/* Header Branding */}
+                <div className="h-20 flex items-center px-6 border-b border-emerald-900/50 bg-emerald-950/60 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="flex items-center gap-3 relative">
+                        {appLogo ? (
+                            <img src={appLogo} alt="Logo" className="w-10 h-10 rounded-2xl object-cover shadow-lg border border-emerald-800/40" />
+                        ) : (
+                            <div className="w-10 h-10 rounded-2xl bg-white/10 p-0.5 shadow-lg border border-emerald-800/40 flex items-center justify-center">
+                                <div className="w-full h-full bg-emerald-800 rounded-[12px] flex items-center justify-center text-emerald-100 font-black text-xl">
+                                    {appName.charAt(0)}
+                                </div>
+                            </div>
+                        )}
+                        <div>
+                            <div className="flex items-center gap-1.5">
+                                <span className="text-base font-black text-white tracking-wide">{appName}</span>
+                                <span className="text-[9px] font-black bg-emerald-500 text-emerald-950 px-1.5 py-0.5 rounded-full uppercase shadow-xs">MR</span>
+                            </div>
+                            <p className="text-[11px] text-emerald-200/80 font-medium">Panel Administrasi Modul</p>
+                        </div>
+                    </div>
+                    <button className="ml-auto lg:hidden text-emerald-200 hover:text-white p-1 rounded-lg hover:bg-white/10" onClick={() => setIsMobileOpen(false)}>
+                        <X className="w-5 h-5" />
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto py-6 px-4 space-y-8">
+                {/* Navigation Items */}
+                <div className="flex-1 overflow-y-auto py-6 px-4 space-y-6 custom-scrollbar">
                     {SIDEBAR_MENUS.map((group, gIdx) => {
-                        // Protect Konfigurasi
-                        if (group.group === 'Konfigurasi' && userProfile?.role === 'user') {
-                            return null;
+                        if (group.group.includes('Konfigurasi') && userProfile?.role === 'user') {
+                            return null
                         }
                         return (
-                            <div key={gIdx}>
-                                <p className="px-3 text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-3">{group.group}</p>
+                            <div key={gIdx} className="space-y-2">
+                                <div className="px-3 flex items-center justify-between">
+                                    <p className="text-[10px] font-black uppercase tracking-widest text-emerald-400/80">{group.group}</p>
+                                </div>
                                 <nav className="space-y-1">
                                     {group.items.map((item, iIdx) => {
-                                        const isActive = pathname === item.href
+                                        const isActive = pathname === item.href || (item.href !== '/admin' && pathname.startsWith(item.href))
                                         return (
                                             <Link
                                                 key={iIdx}
                                                 href={item.href}
+                                                onClick={() => setIsMobileOpen(false)}
                                                 className={cn(
-                                                    "flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium transition-colors",
+                                                    "group relative flex items-center justify-between px-4 py-3 rounded-2xl font-bold text-xs transition-all duration-200",
                                                     isActive
-                                                        ? "bg-primary text-white"
-                                                        : "text-slate-400 hover:text-white hover:bg-slate-800"
+                                                        ? "bg-emerald-900/90 text-white font-black shadow-md border border-emerald-700/50"
+                                                        : "text-emerald-100/80 hover:text-white hover:bg-emerald-900/40"
                                                 )}
                                             >
-                                                <item.icon className={cn("w-5 h-5", isActive ? "text-white" : "text-slate-500")} />
-                                                <span className="text-sm">{item.name}</span>
+                                                <div className="flex items-center gap-3.5">
+                                                    <item.icon className={cn(
+                                                        "w-4 h-4 transition-transform group-hover:scale-110 duration-200",
+                                                        isActive ? "text-emerald-400" : "text-emerald-300/70 group-hover:text-white"
+                                                    )} />
+                                                    <span>{item.name}</span>
+                                                </div>
+                                                {item.badge && (
+                                                    <span className={cn(
+                                                        "text-[9px] font-extrabold px-2 py-0.5 rounded-full border tracking-wide uppercase",
+                                                        isActive
+                                                            ? "bg-emerald-400 text-emerald-950 border-emerald-300"
+                                                            : "bg-emerald-900/60 text-emerald-300 border-emerald-700/40"
+                                                    )}>
+                                                        {item.badge}
+                                                    </span>
+                                                )}
+                                                {isActive && (
+                                                    <motion.div
+                                                        layoutId="activeSidePill"
+                                                        className="absolute right-0 top-1/2 -translate-y-1/2 w-1.5 h-6 bg-emerald-400 rounded-l-full shadow-xs"
+                                                    />
+                                                )}
                                             </Link>
                                         )
                                     })}
@@ -183,93 +265,196 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     })}
                 </div>
 
-                <div className="p-4 border-t border-slate-800 bg-slate-950/50 space-y-2">
-                    <button onClick={() => router.push('/')} className="flex items-center gap-3 px-3 py-3 w-full rounded-xl font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
-                        <Home className="w-5 h-5" />
-                        <span className="text-sm">Kembali ke Beranda</span>
-                    </button>
-                    <button onClick={handleLogout} className="flex items-center gap-3 px-3 py-3 w-full rounded-xl font-medium text-slate-400 hover:text-white hover:bg-destructive/20 hover:text-destructive transition-colors">
-                        <LogOut className="w-5 h-5" />
-                        <span className="text-sm">Keluar Sesi</span>
-                    </button>
+                {/* Footer User Info */}
+                <div className="p-4 border-t border-emerald-900/50 bg-emerald-950/60 space-y-3">
+                    <div className="p-3 bg-emerald-900/30 backdrop-blur-md border border-emerald-800/40 rounded-2xl flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-600 to-teal-700 p-0.5 shrink-0 shadow-md">
+                            <img
+                                src={`https://api.dicebear.com/7.x/notionists/svg?seed=${userProfile?.nama_lengkap || 'Admin'}&backgroundColor=0284c7`}
+                                alt="User Avatar"
+                                className="w-full h-full object-cover rounded-[10px]"
+                            />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                            <p className="text-xs font-bold text-white truncate">
+                                {userProfile?.nama_lengkap || 'Pengguna Admin'}
+                            </p>
+                            <span className="inline-block text-[9px] font-black px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 uppercase tracking-wider mt-0.5">
+                                {userProfile?.role === 'superadmin' ? 'Super Admin' : userProfile?.role === 'admin' ? 'Admin Unit' : (userProfile?.units?.nama || 'Operator')}
+                            </span>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 pt-1">
+                        <button
+                            onClick={() => router.push('/')}
+                            className="flex items-center justify-center gap-2 px-3 py-2 bg-emerald-900/40 hover:bg-emerald-900/70 text-emerald-200 hover:text-white rounded-xl text-xs font-bold transition-all border border-emerald-800/40"
+                        >
+                            <Home className="w-3.5 h-3.5 text-emerald-300" /> Beranda
+                        </button>
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center justify-center gap-2 px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-200 hover:text-white rounded-xl text-xs font-bold transition-all border border-red-500/30"
+                        >
+                            <LogOut className="w-3.5 h-3.5 text-red-300" /> Keluar
+                        </button>
+                    </div>
                 </div>
             </aside>
 
-            {/* Main Content */}
-            <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                {/* Top Navbar */}
-                <header className="h-16 flex items-center justify-between px-6 bg-white border-b border-slate-200 shrink-0 relative z-40">
+            {/* Main Content Area */}
+            <div className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-100">
+                {/* Clean Top Navbar */}
+                <header className="h-20 bg-white border-b border-slate-200/80 px-6 flex items-center justify-between sticky top-0 z-30 shadow-xs">
                     <div className="flex items-center gap-4">
-                        <button className="p-2 lg:hidden text-slate-500 hover:bg-slate-100 rounded-lg" onClick={() => setIsMobileOpen(true)}>
+                        <button
+                            onClick={() => setIsMobileOpen(true)}
+                            className="lg:hidden p-2 text-slate-500 hover:text-slate-900 rounded-xl hover:bg-slate-100 transition-colors"
+                        >
                             <Menu className="w-6 h-6" />
                         </button>
+                        <div className="hidden sm:flex items-center gap-2 text-xs font-bold text-slate-400">
+                            <Link href="/admin" className="hover:text-blue-600 transition-colors">Portal Admin</Link>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                            <span className="text-slate-800 capitalize font-black">
+                                {pathname.split('/').pop() || 'Dasbor'}
+                            </span>
+                        </div>
                     </div>
-                    <div className="flex items-center gap-6">
-                        {/* Notifikasi */}
-                        <div className="relative group cursor-pointer" onMouseEnter={() => setIsNotifOpen(true)} onMouseLeave={() => setIsNotifOpen(false)}>
-                            <div className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors">
-                                <Bell className="w-5 h-5" />
-                            </div>
-                            {notifications.length > 0 && (
-                                <span className="absolute top-1 right-1.5 min-w-[18px] h-[18px] bg-red-500 rounded-full animate-pulse shadow-sm ring-2 ring-white flex items-center justify-center text-[9px] font-bold text-white">{notifications.length}</span>
-                            )}
 
-                            {/* Dropdown Notifikasi */}
-                            <div className={cn(
-                                "absolute right-0 mt-2 w-80 bg-white border border-slate-200 shadow-xl rounded-xl transition-all",
-                                isNotifOpen ? "opacity-100 visible translate-y-0" : "opacity-0 invisible -translate-y-2"
-                            )}>
-                                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
-                                    <p className="text-xs font-bold text-slate-700">Notifikasi</p>
-                                    {notifications.length > 0 && (
-                                        <button onClick={handleMarkAllRead} className="text-[10px] text-primary font-bold hover:underline">Tandai Semua Dibaca</button>
-                                    )}
-                                </div>
-                                <div className="max-h-72 overflow-y-auto">
-                                    {notifications.length > 0 ? (
-                                        notifications.map((notif: any) => (
-                                            <button key={notif.id} onClick={() => handleOpenNotification(notif)} className="w-full text-left px-4 py-3 text-sm text-slate-600 hover:bg-emerald-50 hover:text-emerald-700 border-b border-slate-50 transition-colors flex items-start gap-3">
-                                                <span className="w-2 h-2 mt-1.5 bg-emerald-500 rounded-full shrink-0"></span>
-                                                <div>
-                                                    <p className="font-semibold text-xs leading-relaxed">{notif.pesan}</p>
-                                                    <p className="text-[10px] text-slate-400 mt-0.5">{new Date(notif.created_at).toLocaleString('id-ID')}</p>
+                    <div className="flex items-center gap-3">
+                        {/* Realtime Notification Popover Button */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsNotifOpen(!isNotifOpen)}
+                                className={cn(
+                                    "relative p-2.5 rounded-xl border transition-all",
+                                    notifications.length > 0
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                        : "bg-slate-50 text-slate-600 border-slate-200 hover:bg-slate-100"
+                                )}
+                            >
+                                <Bell className="w-4 h-4" />
+                                {notifications.length > 0 && (
+                                    <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full text-[10px] font-black flex items-center justify-center animate-bounce shadow-xs">
+                                        {notifications.length}
+                                    </span>
+                                )}
+                            </button>
+
+                            <AnimatePresence>
+                                {isNotifOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsNotifOpen(false)} />
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            className="absolute right-0 mt-3 w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border border-slate-200/90 z-50 overflow-hidden"
+                                        >
+                                            <div className="p-4 bg-blue-600 text-white flex items-center justify-between">
+                                                <div className="flex items-center gap-2">
+                                                    <Bell className="w-4 h-4 text-emerald-300" />
+                                                    <h3 className="font-extrabold text-xs">Notifikasi Realtime</h3>
                                                 </div>
-                                            </button>
-                                        ))
-                                    ) : (
-                                        <div className="px-4 py-6 text-xs text-slate-400 text-center flex flex-col items-center justify-center">
-                                            <Inbox className="w-5 h-5 mb-1 opacity-50" />
-                                            Tidak ada notifikasi baru
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
+                                                {notifications.length > 0 && (
+                                                    <button
+                                                        onClick={handleMarkAllRead}
+                                                        className="text-[10px] text-emerald-300 hover:text-white font-bold flex items-center gap-1"
+                                                    >
+                                                        <CheckCircle2 className="w-3 h-3" /> Tandai Dibaca
+                                                    </button>
+                                                )}
+                                            </div>
+
+                                            <div className="max-h-80 overflow-y-auto divide-y divide-slate-100">
+                                                {notifications.length === 0 ? (
+                                                    <div className="p-8 text-center text-slate-400">
+                                                        <Bell className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                                        <p className="text-xs font-semibold">Tidak ada notifikasi baru.</p>
+                                                    </div>
+                                                ) : (
+                                                    notifications.map((n) => (
+                                                        <div
+                                                            key={n.id}
+                                                            onClick={() => handleOpenNotification(n)}
+                                                            className="p-4 hover:bg-slate-50 transition-colors cursor-pointer space-y-1"
+                                                        >
+                                                            <div className="flex justify-between items-start">
+                                                                <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                                                    {n.judul || 'Tiket Masuk'}
+                                                                </span>
+                                                                <span className="text-[9px] text-slate-400 font-bold">
+                                                                    {new Date(n.created_at).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}
+                                                                </span>
+                                                            </div>
+                                                            <p className="text-xs font-bold text-slate-800 leading-snug">{n.pesan}</p>
+                                                        </div>
+                                                    ))
+                                                )}
+                                            </div>
+                                        </motion.div>
+                                    </>
+                                )}
+                            </AnimatePresence>
                         </div>
 
-                        {/* Profil */}
-                        <div className="flex items-center gap-3 border-l border-slate-200 pl-4">
-                            <div className="text-right hidden sm:block">
-                                <p className="text-sm font-bold text-slate-700 capitalize">
-                                    {userProfile?.nama_lengkap || 'Administrator'}
-                                </p>
-                                <p className="text-[10px] text-slate-500 uppercase tracking-widest">
-                                    {userProfile?.role === 'superadmin' ? 'Sistem Pusat' : (userProfile?.units?.nama || 'Global')}
-                                </p>
-                            </div>
-                            <div className="w-10 h-10 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-600 font-bold overflow-hidden shadow-sm shrink-0">
-                                <img src={`https://api.dicebear.com/7.x/notionists/svg?seed=${userProfile?.nama_lengkap || 'Admin'}&backgroundColor=f8fafc`} alt="Profile" className="w-full h-full object-cover" />
-                            </div>
+                        {/* User Profile Pill */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                                className="flex items-center gap-3 p-1.5 pr-3 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-2xl transition-all"
+                            >
+                                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-teal-500 p-0.5 shrink-0">
+                                    <img
+                                        src={`https://api.dicebear.com/7.x/notionists/svg?seed=${userProfile?.nama_lengkap || 'Admin'}&backgroundColor=0284c7`}
+                                        alt="User Avatar"
+                                        className="w-full h-full object-cover rounded-[10px]"
+                                    />
+                                </div>
+                                <div className="text-left hidden md:block">
+                                    <p className="text-xs font-black text-slate-900 leading-tight">
+                                        {userProfile?.nama_lengkap || 'Pengguna Admin'}
+                                    </p>
+                                    <p className="text-[10px] text-emerald-600 font-extrabold capitalize">
+                                        {userProfile?.role || 'Superadmin'}
+                                    </p>
+                                </div>
+                            </button>
+
+                            <AnimatePresence>
+                                {isProfileMenuOpen && (
+                                    <>
+                                        <div className="fixed inset-0 z-40" onClick={() => setIsProfileMenuOpen(false)} />
+                                        <motion.div
+                                            initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            animate={{ opacity: 1, y: 0, scale: 1 }}
+                                            exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                                            className="absolute right-0 mt-3 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 z-50 p-2 space-y-1"
+                                        >
+                                            <div className="p-3 border-b border-slate-100">
+                                                <p className="text-xs font-black text-slate-900 truncate">{userProfile?.nama_lengkap}</p>
+                                                <p className="text-[10px] text-slate-500 font-semibold truncate">{userProfile?.email}</p>
+                                            </div>
+                                            <button
+                                                onClick={handleLogout}
+                                                className="w-full flex items-center gap-2 px-3 py-2.5 text-xs font-bold text-red-600 hover:bg-red-50 rounded-xl transition-colors"
+                                            >
+                                                <LogOut className="w-4 h-4" /> Keluar Sesi
+                                            </button>
+                                        </motion.div>
+                                    </>
+                                )}
+                            </AnimatePresence>
                         </div>
                     </div>
                 </header>
 
-                {/* Dynamic Page Content */}
-                <div className="flex-1 overflow-auto bg-slate-50/50 p-6">
-                    <div className="max-w-6xl mx-auto space-y-6">
-                        {children}
-                    </div>
-                </div>
-            </main>
+                {/* Page View Container */}
+                <main className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar bg-slate-100">
+                    {children}
+                </main>
+            </div>
         </div>
     )
 }

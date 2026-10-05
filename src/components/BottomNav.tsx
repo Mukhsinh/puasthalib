@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Home, ClipboardCheck, MessageSquareWarning, User, Headset } from 'lucide-react'
+import { Home, ClipboardCheck, MessageSquareWarning, SearchCheck, Headset } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { cn } from '@/utils/cn'
 
@@ -15,7 +15,7 @@ export default function BottomNav() {
 
     const rightTabs = [
         { label: 'Komplain', href: '/komplain', icon: MessageSquareWarning },
-        { label: 'Admin', href: '/admin', icon: User },
+        { label: 'Lacak', href: '/lacak', icon: SearchCheck },
     ]
 
     return (

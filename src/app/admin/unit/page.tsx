@@ -38,10 +38,11 @@ export default function AdminUnitPage() {
     useEffect(() => {
         const checkAuth = async () => {
             const { data: { session } } = await supabase.auth.getSession()
-            if (!session) return router.push('/login')
-            const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
-            if (profile?.role === 'user') {
-                return router.push('/admin/tiket')
+            if (session) {
+                const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
+                if (profile?.role === 'user') {
+                    return router.push('/admin/tiket')
+                }
             }
             fetchUnits()
         }

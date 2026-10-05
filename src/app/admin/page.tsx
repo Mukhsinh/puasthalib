@@ -1,5 +1,20 @@
 import React from 'react'
-import { Users, AlertTriangle, CheckCircle, Clock, Activity, ArrowRight, TrendingUp } from 'lucide-react'
+import {
+    Users,
+    AlertTriangle,
+    CheckCircle2,
+    Clock,
+    Activity,
+    ArrowRight,
+    TrendingUp,
+    Sparkles,
+    ShieldCheck,
+    MessageSquare,
+    ChevronRight,
+    BarChart3,
+    Zap,
+    Building2
+} from 'lucide-react'
 import { createClient } from '@/utils/supabase/server'
 import Link from 'next/link'
 
@@ -11,7 +26,7 @@ export default async function AdminDashboard() {
     const { data: { session } } = await supabase.auth.getSession()
     let profile = null
     if (session) {
-        const { data } = await supabase.from('profiles').select('role, unit_id').eq('id', session.user.id).single()
+        const { data } = await supabase.from('profiles').select('role, unit_id, nama_lengkap').eq('id', session.user.id).single()
         profile = data
     }
 
@@ -24,7 +39,13 @@ export default async function AdminDashboard() {
 
     const { count: countTotal } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }))
     const { count: countMenunggu } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Terkirim'))
+    const { count: countProses } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Proses'))
     const { count: countSelesai } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Selesai'))
+
+    // Calculate dynamic SLA compliance
+    const totalCountVal = countTotal || 0
+    const selesaiCountVal = countSelesai || 0
+    const slaRate = totalCountVal > 0 ? Math.min(100, Math.round((selesaiCountVal / totalCountVal) * 100)) : 100
 
     // Fetch latest tickets requiring action
     const { data: latestTickets } = await applyUnitFilter(
@@ -33,161 +54,218 @@ export default async function AdminDashboard() {
             .select('*, units!unit_id(nama)')
             .neq('status', 'Selesai')
             .order('created_at', { ascending: false })
-            .limit(5)
+            .limit(6)
     )
 
     const STATS = [
-        { label: 'Total Tiket', value: countTotal || 0, icon: Users, color: 'from-blue-500 to-indigo-600', shadow: 'shadow-blue-500/20' },
-        { label: 'Menunggu Respon', value: countMenunggu || 0, icon: Clock, color: 'from-orange-400 to-amber-500', shadow: 'shadow-amber-500/20' },
-        { label: 'Selesai', value: countSelesai || 0, icon: CheckCircle, color: 'from-emerald-400 to-teal-500', shadow: 'shadow-emerald-500/20' },
-        { label: 'Warning SLA', value: '0', icon: AlertTriangle, color: 'from-rose-500 to-pink-600', shadow: 'shadow-rose-500/20' },
+        {
+            label: 'Total Tiket Masuk',
+            value: totalCountVal,
+            subtext: 'Seluruh riwayat aduan & pengaduan',
+            icon: Users,
+            bgColor: 'bg-blue-50 text-blue-600',
+            borderColor: 'border-blue-200'
+        },
+        {
+            label: 'Menunggu Tindakan',
+            value: countMenunggu || 0,
+            subtext: 'Tiket baru perlu respon awal',
+            icon: Clock,
+            bgColor: 'bg-amber-50 text-amber-600',
+            borderColor: 'border-amber-200'
+        },
+        {
+            label: 'Dalam Penanganan',
+            value: countProses || 0,
+            subtext: 'Sedang ditindaklanjuti unit',
+            icon: Zap,
+            bgColor: 'bg-teal-50 text-teal-600',
+            borderColor: 'border-teal-200'
+        },
+        {
+            label: 'Selesai Ditangani',
+            value: selesaiCountVal,
+            subtext: 'Telah diberikan solusi resmi',
+            icon: CheckCircle2,
+            bgColor: 'bg-emerald-50 text-emerald-600',
+            borderColor: 'border-emerald-200'
+        },
     ]
 
     return (
-        <div className="animate-in fade-in zoom-in duration-500 pb-8">
-            {/* Header Section */}
-            <div className="relative mb-8 p-8 rounded-[2rem] bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 overflow-hidden shadow-2xl">
-                {/* Decorative background shapes */}
-                <div className="absolute top-0 right-0 w-[40rem] h-[40rem] bg-emerald-500/10 rounded-full blur-3xl -mr-[20rem] -mt-[20rem] pointer-events-none" />
-                <div className="absolute bottom-0 left-0 w-[30rem] h-[30rem] bg-indigo-500/10 rounded-full blur-3xl -ml-[15rem] -mb-[15rem] pointer-events-none" />
-
-                <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-                    <div>
-                        <h1 className="text-3xl font-black text-white tracking-tight mb-2">Selamat Datang di Dasbor</h1>
-                        <p className="text-slate-300 font-medium max-w-xl text-sm leading-relaxed">
-                            Pantau ringkasan performa dan metrik layanan rumah sakit secara real-time. Semua data ditarik secara dinamis dari database utama.
-                        </p>
-                    </div>
-
-                    <div className="shrink-0">
-                        <Link href="/admin/tiket" className="relative group inline-flex items-center justify-center p-0.5 overflow-hidden text-sm font-extrabold text-white rounded-xl bg-gradient-to-br from-emerald-400 to-teal-500 hover:from-emerald-500 hover:to-teal-600 focus:ring-4 focus:outline-none focus:ring-emerald-300 transition-all shadow-xl shadow-emerald-500/30 hover:-translate-y-1">
-                            <span className="relative px-6 py-3 transition-all ease-in duration-200 bg-white/10 backdrop-blur-sm rounded-[10px] flex items-center gap-3">
-                                <span className="bg-white/20 p-1.5 rounded-lg">
-                                    <Activity className="w-5 h-5 text-white group-hover:animate-pulse" />
-                                </span>
-                                Kelola Tiket Sekarang
-                                <ArrowRight className="w-4 h-4 ml-1 opacity-70 group-hover:opacity-100 group-hover:translate-x-1 transition-all" />
-                            </span>
-                        </Link>
-                    </div>
-                </div>
-            </div>
-
-            {/* Stats Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 relative z-20 -mt-16 px-4">
+        <div className="space-y-8 pb-10 font-sans">
+            {/* KPI Metric Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 {STATS.map((stat, idx) => (
                     <div
                         key={idx}
-                        className="bg-white/80 backdrop-blur-xl p-6 rounded-[1.5rem] shadow-xl border border-white/40 group hover:-translate-y-2 transition-all duration-300"
+                        className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 hover:shadow-lg hover:border-slate-300 transition-all duration-300 group flex flex-col justify-between"
                     >
-                        <div className="flex justify-between items-start">
-                            <div>
-                                <p className="text-[11px] font-extrabold text-slate-500 uppercase tracking-widest">{stat.label}</p>
-                                <h3 className="text-4xl font-black text-slate-800 mt-2 tracking-tighter">{stat.value}</h3>
+                        <div>
+                            <div className="flex items-center justify-between">
+                                <span className="text-[11px] font-black text-slate-400 uppercase tracking-wider">{stat.label}</span>
+                                <div className={`w-11 h-11 rounded-2xl ${stat.bgColor} flex items-center justify-center font-extrabold border ${stat.borderColor} group-hover:scale-110 transition-transform duration-300`}>
+                                    <stat.icon className="w-5 h-5 stroke-[2.5]" />
+                                </div>
                             </div>
-                            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center bg-gradient-to-br ${stat.color} ${stat.shadow} shadow-lg text-white transform group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300`}>
-                                <stat.icon className="w-7 h-7 stroke-[2.5]" />
+                            <div className="mt-4 flex items-baseline gap-2">
+                                <h3 className="text-3xl font-black text-slate-900 tracking-tight">{stat.value}</h3>
+                                <span className="text-xs font-extrabold text-slate-400">tiket</span>
                             </div>
                         </div>
-                        <div className="mt-4 w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
-                            <div className={`h-full w-2/3 bg-gradient-to-r ${stat.color} rounded-full opacity-60`} />
+
+                        <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-500">{stat.subtext}</span>
                         </div>
                     </div>
                 ))}
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-8">
-                {/* Tiket Terbaru */}
-                <div className="lg:col-span-2 bg-white rounded-[2rem] p-8 shadow-sm border border-slate-100 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-full blur-3xl -mr-32 -mt-32 pointer-events-none" />
-
-                    <div className="flex items-center justify-between mb-8 relative z-10">
+            {/* Main Content Layout (Tiket Pending + SLA Indicator) */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                {/* Antrean Tiket Butuh Tindakan (2 Cols) */}
+                <div className="lg:col-span-2 bg-white rounded-3xl p-6 sm:p-8 shadow-sm border border-slate-200/80 space-y-6">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5">
                         <div>
-                            <h3 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                                <Clock className="w-5 h-5 text-orange-500" /> Tiket Butuh Tindakan
-                            </h3>
-                            <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-1">Antrian terbaru belum selesai</p>
+                            <div className="flex items-center gap-2">
+                                <div className="w-2.5 h-2.5 bg-orange-500 rounded-full animate-ping" />
+                                <h2 className="text-lg font-black text-slate-900">Antrean Tiket Perlu Respon</h2>
+                            </div>
+                            <p className="text-xs text-slate-500 font-semibold mt-1">Daftar tiket baru dan sedang dalam proses penanganan</p>
                         </div>
-                        <Link href="/admin/tiket" className="group flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-slate-100 hover:bg-emerald-50 px-4 py-2.5 rounded-xl">
-                            Lihat Semua <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+
+                        <Link
+                            href="/admin/tiket"
+                            className="inline-flex items-center gap-2 text-xs font-black text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-4 py-2 rounded-xl transition-colors"
+                        >
+                            Lihat Selengkapnya <ChevronRight className="w-4 h-4" />
                         </Link>
                     </div>
 
-                    <div className="space-y-4 relative z-10">
-                        {(!latestTickets || latestTickets.length === 0) && (
-                            <div className="p-12 text-center text-slate-400 bg-slate-50/50 rounded-2xl border border-dashed border-slate-200">
-                                <CheckCircle className="w-12 h-12 mx-auto text-slate-300 mb-3" />
-                                <p className="font-bold text-slate-500">Semua Beres!</p>
-                                <p className="text-sm mt-1">Belum ada tiket masuk atau butuh tindakan saat ini.</p>
+                    <div className="space-y-3">
+                        {(!latestTickets || latestTickets.length === 0) ? (
+                            <div className="py-12 px-4 text-center rounded-2xl bg-slate-50 border border-dashed border-slate-200 space-y-3">
+                                <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto opacity-80" />
+                                <p className="text-sm font-bold text-slate-700">Semua Tiket Telah Ditangani</p>
+                                <p className="text-xs text-slate-400">Tidak ada aduan yang menggantung atau belum direspon saat ini.</p>
                             </div>
-                        )}
-                        {latestTickets?.map((ticket: any, idx: number) => (
-                            <div key={ticket.id} className="group flex items-center justify-between p-5 bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md hover:border-slate-200 transition-all">
-                                <div className="flex items-center gap-5">
-                                    <div className="w-12 h-12 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center shrink-0 border border-orange-100 group-hover:bg-orange-500 group-hover:text-white transition-colors">
-                                        <Clock className="w-5 h-5 stroke-[2.5]" />
-                                    </div>
-                                    <div>
-                                        <div className="flex items-center gap-3">
-                                            <h4 className="text-sm font-extrabold text-slate-800 uppercase tracking-wide">
-                                                {ticket.jenis.replace('_', ' ')}
-                                            </h4>
-                                            <span className="text-[10px] font-black px-2.5 py-0.5 rounded-md bg-slate-100 text-slate-600 uppercase border border-slate-200">
-                                                {ticket.tracking_number}
-                                            </span>
+                        ) : (
+                            latestTickets.map((t: any) => (
+                                <div
+                                    key={t.id}
+                                    className="p-4 sm:p-5 rounded-2xl bg-slate-50/80 hover:bg-white border border-slate-200/80 hover:border-blue-300 hover:shadow-md transition-all duration-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group"
+                                >
+                                    <div className="flex items-start gap-4">
+                                        <div className="w-10 h-10 rounded-2xl bg-orange-100 text-orange-600 flex items-center justify-center shrink-0 font-bold mt-0.5 group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                                            <MessageSquare className="w-5 h-5" />
                                         </div>
-                                        <p className="text-xs text-slate-500 font-medium mt-1.5 flex items-center gap-2">
-                                            Status: <span className="text-orange-600 font-bold">{ticket.status}</span>
-                                            <span className="w-1 h-1 bg-slate-300 rounded-full" />
-                                            Tujuan: {ticket.units?.nama || 'Global'}
-                                        </p>
+
+                                        <div className="space-y-1">
+                                            <div className="flex flex-wrap items-center gap-2">
+                                                <span className="text-xs font-black text-slate-900 uppercase tracking-wide">
+                                                    {t.jenis ? t.jenis.replace(/_/g, ' ') : 'PENGADUAN'}
+                                                </span>
+                                                <span className="text-[10px] font-mono font-bold bg-slate-200 text-slate-700 px-2 py-0.5 rounded-md">
+                                                    {t.tracking_number}
+                                                </span>
+                                            </div>
+                                            <p className="text-xs font-semibold text-slate-600 line-clamp-1">
+                                                {t.deskripsi || 'Tidak ada deskripsi rinci'}
+                                            </p>
+                                            <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-1">
+                                                <span className="flex items-center gap-1 font-bold text-slate-500">
+                                                    <Building2 className="w-3.5 h-3.5 text-slate-400" />
+                                                    {t.units?.nama || 'Global'}
+                                                </span>
+                                                <span>•</span>
+                                                <span>{new Date(t.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex items-center justify-between sm:justify-end gap-3 pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-200/60">
+                                        <span className={`text-[10px] font-black px-3 py-1 rounded-full uppercase border ${t.status === 'Terkirim'
+                                            ? 'bg-amber-50 text-amber-600 border-amber-200'
+                                            : 'bg-teal-50 text-teal-600 border-teal-200'
+                                            }`}>
+                                            {t.status}
+                                        </span>
+                                        <Link
+                                            href="/admin/tiket"
+                                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition-colors shadow-xs"
+                                        >
+                                            Respon
+                                        </Link>
                                     </div>
                                 </div>
-                                <div className="text-right flex flex-col items-end gap-2 text-slate-400">
-                                    <span className="text-[11px] font-bold">{new Date(ticket.created_at).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}</span>
-                                    <Link href="/admin/tiket" className="px-5 py-2 bg-slate-900 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-slate-800 transition-colors opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0">
-                                        Respon Sekarang
-                                    </Link>
-                                </div>
-                            </div>
-                        ))}
+                            ))
+                        )}
                     </div>
                 </div>
 
-                {/* SLA Status Widget */}
-                <div className="bg-slate-900 rounded-[2rem] p-8 shadow-2xl relative overflow-hidden text-white flex flex-col justify-between border border-slate-800">
-                    <div className="absolute top-0 right-0 w-48 h-48 rounded-full bg-emerald-500/20 blur-3xl -mr-10 -mt-10 pointer-events-none" />
-                    <div className="absolute bottom-0 left-0 w-32 h-32 rounded-full bg-blue-500/20 blur-2xl -ml-10 -mb-10 pointer-events-none" />
-
-                    <div className="relative z-10">
-                        <div className="flex justify-between items-start mb-6">
-                            <div>
-                                <h3 className="text-lg font-extrabold text-white flex items-center gap-2">
-                                    <TrendingUp className="w-5 h-5 text-emerald-400" /> Kepatuhan SLA
-                                </h3>
-                                <p className="text-[11px] text-slate-400 font-bold uppercase tracking-widest mt-1">Performa bulan ini</p>
+                {/* Performa SLA & Quick Summary (1 Col) */}
+                <div className="space-y-6">
+                    {/* SLA Compliance Widget (Clean White Card) */}
+                    <div className="rounded-3xl bg-white p-6 sm:p-8 text-slate-900 shadow-sm border border-slate-200/80 space-y-6 relative overflow-hidden">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2.5">
+                                <ShieldCheck className="w-5 h-5 text-emerald-600" />
+                                <h3 className="text-xs font-black uppercase tracking-wider text-slate-700">Kepatuhan Respon SLA</h3>
                             </div>
-                            <div className="w-10 h-10 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center">
-                                <Activity className="w-5 h-5 text-slate-300" />
-                            </div>
+                            <span className="text-[10px] font-bold px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">Target 95%</span>
                         </div>
 
-                        <div className="mt-8 mb-4">
-                            <div className="flex items-baseline gap-2 mb-2">
-                                <span className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-br from-emerald-400 to-teal-300 drop-shadow-sm">100</span>
-                                <span className="text-2xl font-bold text-emerald-500">%</span>
+                        <div className="space-y-2">
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-5xl font-black text-slate-900 tracking-tight">{slaRate}%</span>
+                                <span className="text-xs font-bold text-emerald-600">Tingkat Penanganan</span>
                             </div>
-                            <p className="text-sm font-bold text-slate-300 bg-slate-800/50 inline-block px-3 py-1 rounded-lg border border-slate-700">Target Tahunan: 95%</p>
+                            <p className="text-xs text-slate-500 leading-relaxed font-medium">
+                                Persentase tiket aduan yang telah dituntaskan dan diberikan solusi secara memadai.
+                            </p>
                         </div>
 
-                        <p className="text-sm text-slate-400 leading-relaxed mt-4">
-                            Persentase tiket diselesaikan tepat waktu sesuai ambang batas Service Level Agreement.
-                        </p>
-
-                        <div className="w-full h-4 bg-slate-800 rounded-full mt-8 overflow-hidden border border-slate-700/50 shadow-inner">
-                            <div className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full w-full relative">
-                                <div className="absolute inset-0 bg-white/20 w-full animate-pulse" />
+                        <div className="space-y-2 pt-2">
+                            <div className="w-full h-3 bg-slate-100 rounded-full overflow-hidden p-0.5 border border-slate-200">
+                                <div
+                                    className="h-full bg-gradient-to-r from-emerald-500 to-teal-400 rounded-full transition-all duration-1000"
+                                    style={{ width: `${slaRate}%` }}
+                                />
                             </div>
+                            <div className="flex justify-between text-[10px] text-slate-400 font-semibold">
+                                <span>0%</span>
+                                <span>Status Terkini: {slaRate >= 95 ? 'Sangat Baik' : 'Optimal'}</span>
+                                <span>100%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Quick Access Menu Card */}
+                    <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200/80 space-y-4">
+                        <h3 className="text-xs font-black uppercase tracking-wider text-slate-400">Akses Cepat Analitik</h3>
+
+                        <div className="space-y-2">
+                            <Link
+                                href="/admin/analisa"
+                                className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 hover:bg-blue-50 text-slate-700 hover:text-blue-700 font-bold text-xs transition-colors border border-slate-200/60"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <BarChart3 className="w-4 h-4 text-blue-600" />
+                                    <span>Analisa Tren Aduan</span>
+                                </div>
+                                <ChevronRight className="w-4 h-4 opacity-50" />
+                            </Link>
+
+                            <Link
+                                href="/admin/analisis-kepuasan"
+                                className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 hover:bg-emerald-50 text-slate-700 hover:text-emerald-700 font-bold text-xs transition-colors border border-slate-200/60"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                                    <span>Survei IKM Kepuasan</span>
+                                </div>
+                                <ChevronRight className="w-4 h-4 opacity-50" />
+                            </Link>
                         </div>
                     </div>
                 </div>
@@ -195,3 +273,4 @@ export default async function AdminDashboard() {
         </div>
     )
 }
+

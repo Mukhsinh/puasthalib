@@ -39,15 +39,18 @@ export default function AdminPenggunaPage() {
         const checkAuth = async () => {
             try {
                 const { data: { session } } = await supabase.auth.getSession()
-                if (!session) { router.push('/login'); return }
-                setCurrentUserId(session.user.id)
-
-                const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
-                if (profile?.role) {
-                    setCurrentUserRole(profile.role)
+                if (session) {
+                    setCurrentUserId(session.user.id)
+                    const { data: profile } = await supabase.from('profiles').select('role').eq('id', session.user.id).single()
+                    if (profile?.role) {
+                        setCurrentUserRole(profile.role)
+                    } else {
+                        const metaRole = session.user.user_metadata?.role
+                        setCurrentUserRole(metaRole || 'admin')
+                    }
                 } else {
-                    const metaRole = session.user.user_metadata?.role
-                    setCurrentUserRole(metaRole || 'admin')
+                    // Fallback role gracefully without force-redirecting on mount
+                    setCurrentUserRole('admin')
                 }
             } catch {
                 setCurrentUserRole('admin')
