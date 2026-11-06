@@ -45,6 +45,7 @@ export default function AdminTiketPage() {
     // Search & Filter State
     const [searchQuery, setSearchQuery] = useState('')
     const [statusFilter, setStatusFilter] = useState('Semua')
+    const [filterUnit, setFilterUnit] = useState('Semua')
 
     const [actionForm, setActionForm] = useState({
         actionType: 'respon',
@@ -211,7 +212,10 @@ export default function AdminTiketPage() {
     const handleExportExcel = () => {
         setIsGenerating(true)
         setTimeout(() => {
-            const worksheetData = tickets.map((t, index) => {
+            const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
+            const exportData = filteredTickets
+
+            const worksheetData = exportData.map((t, index) => {
                 const reporter = t.data_pelapor?.nama || t.data_payload?.nama || '-'
                 const phone = t.data_pelapor?.hp || t.data_payload?.hp || '-'
                 const detail = t.data_payload?.uraian || t.data_payload?.feedback || t.data_payload?.informasi_diminta || '-'
@@ -221,12 +225,11 @@ export default function AdminTiketPage() {
                     'ID Tiket': t.tracking_number,
                     Tanggal: new Date(t.created_at).toLocaleString('id-ID'),
                     Kategori: t.jenis.replace(/_/g, ' ').toUpperCase(),
-                    Unit: t.units?.nama || 'Global',
+                    'Unit Kerja': t.units?.nama || 'Global',
                     Status: t.status,
-                    'Nama Pemohon / Pelapor': reporter,
-                    'Nomor HP Pemohon': phone,
-                    'Keperluan / Uraian Detail': detail,
-                    'Tindakan Terakhir': t.data_payload?.tindakan_terakhir?.action || '-'
+                    'Nama Pelapor': reporter,
+                    'Nomor Kontak': phone,
+                    'Uraian Laporan / Tindakan': detail
                 }
             })
 
@@ -237,18 +240,33 @@ export default function AdminTiketPage() {
                 [appSettings.kop_rs.toUpperCase()],
                 [`${appSettings.kop_alamat} | ${appSettings.kop_kontak}`],
                 [],
-                ['LAPORAN MANAJEMEN TIKET KOMPREHENSIF'],
-                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID')}`],
-                [`Penanggung Jawab Laporan: ${signerName} (${signerRole})`],
+                ['LAPORAN REKAPITULASI MANAJEMEN TIKET & PENGADUAN LAYANAN'],
+                [`Unit Kerja: ${unitText} | Status: ${statusFilter}`],
+                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+                [`Penanggung Jawab: ${signerName} (${signerRole})`],
                 [],
-                ['1. Tabulasi Data Tiket Masuk']
+                [`Total Berkas: ${exportData.length} Tiket | Selesai: ${exportData.filter(x => x.status === 'Selesai').length} Tiket`],
+                [],
+                ['TABULASI DAFTAR TIKET TERFILTER:']
             ], { origin: 'A1' })
 
-            xlsx.utils.sheet_add_json(worksheet, worksheetData, { origin: 'A10' })
+            xlsx.utils.sheet_add_json(worksheet, worksheetData, { origin: 'A13' })
+
+            worksheet['!cols'] = [
+                { wch: 6 },
+                { wch: 18 },
+                { wch: 18 },
+                { wch: 22 },
+                { wch: 25 },
+                { wch: 15 },
+                { wch: 25 },
+                { wch: 16 },
+                { wch: 45 }
+            ]
 
             const workbook = xlsx.utils.book_new()
-            xlsx.utils.book_append_sheet(workbook, worksheet, "Raw_Tiket")
-            xlsx.writeFile(workbook, `Data_Tiket_${new Date().toISOString().slice(0, 10)}.xlsx`)
+            xlsx.utils.book_append_sheet(workbook, worksheet, "Tiket_Layanan")
+            xlsx.writeFile(workbook, `Laporan_Tiket_${unitText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`)
             setIsGenerating(false)
         }, 800)
     }
@@ -256,33 +274,62 @@ export default function AdminTiketPage() {
     const handleExportPDF = () => {
         setIsGenerating(true)
         setTimeout(() => {
-            const tableHeaders = ['No', 'ID Tiket', 'Tanggal', 'Kategori', 'Unit', 'Status', 'Saran/Uraian'];
-            const tableData = tickets.map((t, index) => {
+            const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
+            const exportData = filteredTickets
+            const totalT = exportData.length
+            const selesaiT = exportData.filter(x => x.status === 'Selesai').length
+            const prosesT = exportData.filter(x => x.status === 'Diproses' || x.status === 'Proses').length
+            const tungguT = exportData.filter(x => x.status === 'Terkirim').length
+            const resolusiPct = totalT > 0 ? Math.round((selesaiT / totalT) * 100) : 0
+
+            const tableHeaders = ['No', 'ID Tiket', 'Tanggal', 'Kategori', 'Unit Kerja', 'Status', 'Pelapor / Uraian'];
+            const tableData = exportData.slice(0, 50).map((t, index) => {
+                const reporter = t.data_pelapor?.nama || t.data_payload?.nama || '-'
                 const detail = t.data_payload?.uraian || t.data_payload?.feedback || t.data_payload?.informasi_diminta || '-'
                 return [
                     index + 1,
                     t.tracking_number,
-                    new Date(t.created_at).toLocaleString('id-ID'),
+                    new Date(t.created_at).toLocaleDateString('id-ID'),
                     t.jenis.replace(/_/g, ' ').toUpperCase(),
                     t.units?.nama || 'Global',
                     t.status,
-                    detail
+                    `${reporter}\n${detail.substring(0, 60)}...`
                 ]
             });
 
             generateFormalPDF({
-                title: 'LAPORAN MANAJEMEN TIKET (KOMPREHENSIF)',
-                additionalInfo: [
-                    'Laporan ini berisikan rincian seluruh tiket aduan, layanan, dan komplain yang terdaftar dalam sistem.',
-                    `Total Laporan: ${tickets.length} Tiket | Tiket Selesai: ${tickets.filter(x => x.status === 'Selesai').length}`,
-                    '',
-                    '1. Rincian Tiket dan Uraian Laporan:'
-                ],
-                filename: `Laporan_Tiket_Komprehensif_${new Date().toISOString().slice(0, 10)}.pdf`,
+                title: 'LAPORAN REKAPITULASI PENANGANAN TIKET LAYANAN',
+                subtitle: `Unit Kerja: ${unitText} • Status Filter: ${statusFilter} • Evaluasi Real-Time`,
+                documentNumber: `PUAS/TKT/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
+                filename: `Laporan_Tiket_${unitText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`,
                 appSettings,
                 printDate,
                 signerName,
                 signerRole,
+                includeCoverPage: true,
+                kpiCards: [
+                    { title: 'Total Tiket', value: totalT, subtitle: `Unit ${unitText}` },
+                    { title: 'Selesai', value: selesaiT, subtitle: 'Tuntas Ditangani' },
+                    { title: 'Diproses / Antre', value: `${prosesT} / ${tungguT}`, subtitle: 'Dalam Penanganan' },
+                    { title: 'Resolusi Rate', value: `${resolusiPct}%`, subtitle: 'Tingkat Penyelesaian' },
+                ],
+                chartSections: [
+                    {
+                        title: 'GRAFIK STATUS PENANGANAN TIKET LAYANAN:',
+                        items: [
+                            { label: 'Tiket Selesai', value: selesaiT, max: totalT || 1, displayValue: `${selesaiT} Tiket (${resolusiPct}%)`, color: [16, 185, 129] },
+                            { label: 'Sedang Diproses', value: prosesT, max: totalT || 1, displayValue: `${prosesT} Tiket`, color: [59, 130, 246] },
+                            { label: 'Menunggu Verifikasi', value: tungguT, max: totalT || 1, displayValue: `${tungguT} Tiket`, color: [245, 158, 11] },
+                        ]
+                    }
+                ],
+                narrativeIntro: [
+                    'I. RINGKASAN EKSEKUTIF PENANGANAN TIKET',
+                    `Laporan ini menyajikan rekapitulasi penanganan seluruh tiket layanan, permohonan informasi, dan aduan masyarakat pada lingkungan ${unitText} di ${appSettings.kop_rs}.`,
+                    `Berdasarkan data operasional, tercatat sebanyak ${totalT} berkas laporan masuk, dengan rincian ${selesaiT} tiket telah berhasil diselesaikan (${resolusiPct}%), ${prosesT} tiket dalam proses penanganan oleh unit terkait, dan ${tungguT} tiket dalam antrean awal.`,
+                    '',
+                    'II. TABULASI RINCI BERKAS TIKET LAYANAN:'
+                ],
                 tableHeaders,
                 tableData
             });
@@ -290,12 +337,14 @@ export default function AdminTiketPage() {
         }, 500)
     }
 
-    // Filter tickets based on status tab & search query
+    // Filter tickets based on status tab, unit filter & search query
     const filteredTickets = tickets.filter(t => {
         const matchesStatus = statusFilter === 'Semua' ? true :
             statusFilter === 'Menunggu' ? t.status === 'Terkirim' :
                 statusFilter === 'Proses' ? (t.status === 'Diproses' || t.status === 'Proses') :
                     statusFilter === 'Selesai' ? t.status === 'Selesai' : true
+
+        const matchesUnit = filterUnit === 'Semua' ? true : t.unit_id === filterUnit
 
         const q = searchQuery.toLowerCase()
         const reporterName = (t.data_pelapor?.nama || t.data_payload?.nama || '').toLowerCase()
@@ -305,14 +354,18 @@ export default function AdminTiketPage() {
 
         const matchesSearch = !q || trackingNum.includes(q) || reporterName.includes(q) || unitName.includes(q) || jenisName.includes(q)
 
-        return matchesStatus && matchesSearch
+        return matchesStatus && matchesUnit && matchesSearch
     })
 
     const countStatus = (status: string) => {
-        if (status === 'Semua') return tickets.length
-        if (status === 'Menunggu') return tickets.filter(t => t.status === 'Terkirim').length
-        if (status === 'Proses') return tickets.filter(t => t.status === 'Diproses' || t.status === 'Proses').length
-        if (status === 'Selesai') return tickets.filter(t => t.status === 'Selesai').length
+        let baseList = tickets
+        if (filterUnit !== 'Semua') {
+            baseList = tickets.filter(t => t.unit_id === filterUnit)
+        }
+        if (status === 'Semua') return baseList.length
+        if (status === 'Menunggu') return baseList.filter(t => t.status === 'Terkirim').length
+        if (status === 'Proses') return baseList.filter(t => t.status === 'Diproses' || t.status === 'Proses').length
+        if (status === 'Selesai') return baseList.filter(t => t.status === 'Selesai').length
         return 0
     }
 
@@ -402,38 +455,55 @@ export default function AdminTiketPage() {
                 </div>
             </div>
 
-            {/* Filter Tabs & Search Bar */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-4 print:hidden">
-                {/* Tabs */}
-                <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/60 rounded-2xl overflow-x-auto">
-                    {['Semua', 'Menunggu', 'Proses', 'Selesai'].map((tab) => {
-                        const isActive = statusFilter === tab
-                        const count = countStatus(tab)
-                        return (
-                            <button
-                                key={tab}
-                                onClick={() => setStatusFilter(tab)}
-                                className={cn(
-                                    "flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-extrabold transition-all shrink-0",
-                                    isActive
-                                        ? "bg-white text-slate-900 shadow-sm"
-                                        : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
-                                )}
-                            >
-                                <span>{tab}</span>
-                                <span className={cn(
-                                    "px-1.5 py-0.5 rounded-full text-[10px] font-black",
-                                    isActive ? "bg-emerald-500 text-white" : "bg-slate-300/80 text-slate-700"
-                                )}>
-                                    {count}
-                                </span>
-                            </button>
-                        )
-                    })}
+            {/* Filter Tabs, Search Bar, & Filter Unit Kerja (Poin 2) */}
+            <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 print:hidden">
+                <div className="flex flex-wrap items-center gap-2">
+                    {/* Tabs */}
+                    <div className="flex items-center gap-1.5 p-1.5 bg-slate-200/60 rounded-2xl overflow-x-auto">
+                        {['Semua', 'Menunggu', 'Proses', 'Selesai'].map((tab) => {
+                            const isActive = statusFilter === tab
+                            const count = countStatus(tab)
+                            return (
+                                <button
+                                    key={tab}
+                                    onClick={() => setStatusFilter(tab)}
+                                    className={cn(
+                                        "flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-extrabold transition-all shrink-0",
+                                        isActive
+                                            ? "bg-white text-slate-900 shadow-sm"
+                                            : "text-slate-600 hover:text-slate-900 hover:bg-white/50"
+                                    )}
+                                >
+                                    <span>{tab}</span>
+                                    <span className={cn(
+                                        "px-1.5 py-0.5 rounded-full text-[10px] font-black",
+                                        isActive ? "bg-emerald-500 text-white" : "bg-slate-300/80 text-slate-700"
+                                    )}>
+                                        {count}
+                                    </span>
+                                </button>
+                            )
+                        })}
+                    </div>
+
+                    {/* Filter Unit Kerja Dropdown */}
+                    <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-3 py-1.5 rounded-2xl shadow-xs">
+                        <Building2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <select
+                            value={filterUnit}
+                            onChange={(e) => setFilterUnit(e.target.value)}
+                            className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer pr-1"
+                        >
+                            <option value="Semua">Semua Unit Kerja</option>
+                            {units.map((u) => (
+                                <option key={u.id} value={u.id}>{u.nama}</option>
+                            ))}
+                        </select>
+                    </div>
                 </div>
 
                 {/* Search Bar */}
-                <div className="relative min-w-[260px]">
+                <div className="relative min-w-[240px]">
                     <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
                         type="text"

@@ -4,6 +4,7 @@ import autoTable from 'jspdf-autotable';
 export interface PDFExportOptions {
     title: string;
     subtitle?: string;
+    documentNumber?: string;
     filename: string;
     appSettings: {
         kop_nama: string;
@@ -11,12 +12,33 @@ export interface PDFExportOptions {
         kop_alamat: string;
         kop_kontak: string;
         app_logo?: string;
+        app_footer_text?: string;
     };
     printDate: string;
     signerName: string;
     signerRole: string;
-    tableHeaders: string[];
-    tableData: any[][];
+    includeCoverPage?: boolean;
+    narrativeIntro?: string[];
+    kpiCards?: { title: string; value: string | number; subtitle?: string }[];
+    chartSections?: {
+        title: string;
+        items: {
+            label: string;
+            value: number;
+            max?: number;
+            displayValue?: string;
+            color?: [number, number, number];
+        }[];
+    }[];
+    sections?: {
+        sectionTitle: string;
+        sectionNote?: string;
+        headers: string[];
+        data: any[][];
+        columnWidths?: Record<number, number>;
+    }[];
+    tableHeaders?: string[];
+    tableData?: any[][];
     additionalInfo?: string[];
     additionalInfoBottom?: string[];
     tableHeadersBottom?: string[];
@@ -25,152 +47,469 @@ export interface PDFExportOptions {
 
 export const generateFormalPDF = (options: PDFExportOptions) => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-
-    const margin = 15;
-    let yPos = margin;
     const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
+    const margin = 14;
 
-    // --- KOP SURAT ---
-    // Try to add logo if available
-    if (options.appSettings.app_logo && options.appSettings.app_logo.startsWith('data:image')) {
-        try {
-            doc.addImage(options.appSettings.app_logo, 'PNG', margin, yPos - 2, 15, 15);
-        } catch (e) {
-            // Silently ignore logo errors
+    // --- 1. COVER PAGE RESMI (JIKA includeCoverPage TRUE / DEFAULT TRUE UNTUK LAPORAN FORMAL) ---
+    const shouldAddCover = options.includeCoverPage !== false;
+
+    if (shouldAddCover) {
+        // Background Header Navy
+        doc.setFillColor(15, 23, 42);
+        doc.rect(0, 0, pageWidth, 75, 'F');
+
+        // Decorative Accent Line
+        doc.setFillColor(13, 148, 136); // teal
+        doc.rect(0, 75, pageWidth, 3, 'F');
+
+        // Logo
+        if (options.appSettings.app_logo && options.appSettings.app_logo.startsWith('data:image')) {
+            try {
+                doc.addImage(options.appSettings.app_logo, 'PNG', pageWidth / 2 - 12, 12, 24, 24);
+            } catch (e) { }
         }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10);
+        doc.setTextColor(148, 163, 184);
+        doc.text(options.appSettings.kop_nama.toUpperCase(), pageWidth / 2, 45, { align: 'center' });
+
+        doc.setFontSize(16);
+        doc.setTextColor(255, 255, 255);
+        doc.text(options.appSettings.kop_rs.toUpperCase(), pageWidth / 2, 53, { align: 'center' });
+
+        doc.setFontSize(9);
+        doc.setTextColor(203, 213, 225);
+        doc.text('SISTEM INFORMASI & EVALUASI LAYANAN PUBLIK TERPADU (PUAS)', pageWidth / 2, 62, { align: 'center' });
+
+        // Middle Title Box
+        let cy = 105;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(20);
+        doc.setTextColor(15, 23, 42);
+        const titleLines = doc.splitTextToSize(options.title.toUpperCase(), pageWidth - margin * 3);
+        doc.text(titleLines, pageWidth / 2, cy, { align: 'center' });
+        cy += (titleLines.length * 8) + 6;
+
+        if (options.subtitle) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(11);
+            doc.setTextColor(71, 85, 105);
+            const subLines = doc.splitTextToSize(options.subtitle, pageWidth - margin * 3);
+            doc.text(subLines, pageWidth / 2, cy, { align: 'center' });
+            cy += (subLines.length * 6) + 12;
+        }
+
+        // Formal Metadata Box
+        const boxW = 160;
+        const boxH = 46;
+        const boxX = (pageWidth - boxW) / 2;
+
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.4);
+        doc.roundedRect(boxX, cy, boxW, boxH, 2.5, 2.5, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text('INFORMASI REGISTRASI DOKUMEN:', boxX + 8, cy + 8);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(9);
+        doc.setTextColor(30, 41, 59);
+
+        const docNum = options.documentNumber || `PUAS/LAP/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/001`;
+        doc.text(`Nomor Dokumen  : ${docNum}`, boxX + 8, cy + 16);
+        doc.text(`Tanggal Cetak   : ${new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, boxX + 8, cy + 23);
+        doc.text(`Pejabat Pengesah: ${options.signerName}`, boxX + 8, cy + 30);
+        doc.text(`Jabatan         : ${options.signerRole}`, boxX + 8, cy + 37);
+
+        // Bottom Cover Footer
+        doc.setFontSize(8.5);
+        doc.setTextColor(148, 163, 184);
+        const footerInstansi = `${options.appSettings.kop_rs} • Portal PUAS Eksekutif © ${new Date().getFullYear()}`;
+        doc.text(footerInstansi, pageWidth / 2, pageHeight - 16, { align: 'center' });
+
+        // Add page for content
+        doc.addPage();
     }
+
+    let yPos = margin;
+
+    // --- 2. DRAW KOP SURAT FORMAL RESMI ---
+    const drawKopSurat = () => {
+        if (options.appSettings.app_logo && options.appSettings.app_logo.startsWith('data:image')) {
+            try {
+                doc.addImage(options.appSettings.app_logo, 'PNG', margin, yPos - 2, 16, 16);
+            } catch (e) { }
+        }
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(11);
+        doc.setTextColor(30, 41, 59);
+        doc.text(options.appSettings.kop_nama.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
+        yPos += 5;
+
+        doc.setFontSize(14);
+        doc.setTextColor(15, 23, 42);
+        doc.text(options.appSettings.kop_rs.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
+        yPos += 5;
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(71, 85, 105);
+        doc.text(options.appSettings.kop_alamat, pageWidth / 2, yPos, { align: 'center' });
+        yPos += 3.8;
+        doc.text(options.appSettings.kop_kontak, pageWidth / 2, yPos, { align: 'center' });
+        yPos += 4.5;
+
+        // Garis Ganda Pembatas Kop Resmi
+        doc.setDrawColor(15, 23, 42);
+        doc.setLineWidth(0.7);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 0.8;
+        doc.setLineWidth(0.2);
+        doc.line(margin, yPos, pageWidth - margin, yPos);
+        yPos += 6;
+    };
+
+    drawKopSurat();
+
+    // --- 3. JUDUL & SUBJUDUL RESMI ---
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text(options.appSettings.kop_nama.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
-    yPos += 7;
-
-    doc.setFontSize(16);
-    doc.text(options.appSettings.kop_rs.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
-    yPos += 6;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    doc.text(options.appSettings.kop_alamat, pageWidth / 2, yPos, { align: 'center' });
-    yPos += 5;
-    doc.text(options.appSettings.kop_kontak, pageWidth / 2, yPos, { align: 'center' });
-    yPos += 8;
-
-    // Line separator
-    doc.setLineWidth(0.5);
-    doc.line(margin, yPos, pageWidth - margin, yPos);
-    yPos += 1;
-    doc.setLineWidth(0.2);
-    doc.line(margin, yPos, pageWidth - margin, yPos);
-    yPos += 10;
-
-    // --- TITLE ---
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(12);
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
     doc.text(options.title.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
-    yPos += 6;
+    yPos += 4.5;
 
     if (options.subtitle) {
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(10);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(71, 85, 105);
         doc.text(options.subtitle, pageWidth / 2, yPos, { align: 'center' });
-        yPos += 8;
+        yPos += 5.5;
     }
 
-    if (options.additionalInfo && options.additionalInfo.length > 0) {
-        doc.setFontSize(10);
-        options.additionalInfo.forEach(info => {
-            doc.text(info, margin, yPos);
-            yPos += 5;
+    // --- 4. KARTU RINGKASAN METRIK (KPI CARDS) ---
+    if (options.kpiCards && options.kpiCards.length > 0) {
+        const totalCards = options.kpiCards.length;
+        const availableW = pageWidth - margin * 2;
+        const cardGap = 3;
+        const cardW = (availableW - (cardGap * (totalCards - 1))) / totalCards;
+        const cardH = 15;
+
+        options.kpiCards.forEach((kpi, idx) => {
+            const cardX = margin + idx * (cardW + cardGap);
+            doc.setFillColor(248, 250, 252);
+            doc.setDrawColor(203, 213, 225);
+            doc.setLineWidth(0.3);
+            doc.roundedRect(cardX, yPos, cardW, cardH, 1.5, 1.5, 'FD');
+
+            doc.setFillColor(13, 148, 136); // teal accent line
+            doc.rect(cardX, yPos, cardW, 1.2, 'F');
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(6.5);
+            doc.setTextColor(100, 116, 139);
+            doc.text(kpi.title.toUpperCase(), cardX + cardW / 2, yPos + 4.5, { align: 'center' });
+
+            doc.setFontSize(10.5);
+            doc.setTextColor(15, 23, 42);
+            doc.text(String(kpi.value), cardX + cardW / 2, yPos + 9.5, { align: 'center' });
+
+            if (kpi.subtitle) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(5.5);
+                doc.setTextColor(71, 85, 105);
+                doc.text(kpi.subtitle, cardX + cardW / 2, yPos + 13, { align: 'center' });
+            }
+        });
+
+        yPos += cardH + 5;
+    }
+
+    // --- 5. NARASI PENGANTAR LAPORAN (BAHASA NATURAL, FORMAL, PROFESIONAL) ---
+    const narrativeToUse = options.narrativeIntro || options.additionalInfo || [];
+    if (narrativeToUse.length > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(51, 65, 85);
+
+        narrativeToUse.forEach(line => {
+            if (line === '') {
+                yPos += 1.5;
+            } else if (line.startsWith('I.') || line.startsWith('II.') || line.startsWith('III.') || line.startsWith('IV.') || line.startsWith('A.') || line.startsWith('B.') || line.startsWith('C.')) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(15, 23, 42);
+                doc.text(line, margin, yPos);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(51, 65, 85);
+                yPos += 4.5;
+            } else {
+                const lines = doc.splitTextToSize(line, pageWidth - margin * 2);
+                doc.text(lines, margin, yPos);
+                yPos += lines.length * 4;
+            }
         });
         yPos += 3;
     }
 
-    // --- TABLE ---
-    autoTable(doc, {
-        startY: yPos,
-        head: [options.tableHeaders],
-        body: options.tableData,
-        theme: 'striped',
-        styles: {
-            font: 'helvetica',
-            fontSize: 9,
-            cellPadding: 3,
-        },
-        headStyles: {
-            fillColor: [47, 54, 64],
-            textColor: [255, 255, 255],
-            fontStyle: 'bold',
-        },
-        margin: { left: margin, right: margin },
-    });
+    // --- 6. GRAFIK VEKTOR PROFESIONAL SESUAI DATA (CHART SECTIONS) ---
+    if (options.chartSections && options.chartSections.length > 0) {
+        options.chartSections.forEach(chart => {
+            if (yPos > pageHeight - 50) {
+                doc.addPage();
+                yPos = margin + 10;
+            }
 
-    // @ts-ignore
-    let finalY = doc.lastAutoTable.finalY + 10;
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(15, 23, 42);
+            doc.text(chart.title, margin, yPos);
+            yPos += 4;
 
-    if (options.additionalInfoBottom && options.additionalInfoBottom.length > 0) {
-        doc.setFontSize(10);
-        doc.setFont('helvetica', 'normal');
-        options.additionalInfoBottom.forEach(info => {
-            doc.text(info, margin, finalY);
-            finalY += 5;
+            const chartW = pageWidth - margin * 2;
+            const barHeight = 4.5;
+            const barGap = 2.5;
+
+            chart.items.forEach(item => {
+                const maxVal = item.max || 100;
+                const ratio = Math.min(Math.max(item.value / maxVal, 0), 1);
+                const barMaxWidth = chartW - 65; // sisa untuk label dan angka
+
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(7.5);
+                doc.setTextColor(51, 65, 85);
+
+                // Label nama
+                const labelText = doc.splitTextToSize(item.label, 45)[0];
+                doc.text(labelText, margin, yPos + 3.2);
+
+                // Bar track (latar belakang abu)
+                const barX = margin + 48;
+                doc.setFillColor(241, 245, 249);
+                doc.roundedRect(barX, yPos, barMaxWidth, barHeight, 1, 1, 'F');
+
+                // Bar fill
+                const fillColor = item.color || [37, 99, 235];
+                doc.setFillColor(fillColor[0], fillColor[1], fillColor[2]);
+                const fillW = Math.max(barMaxWidth * ratio, 2);
+                doc.roundedRect(barX, yPos, fillW, barHeight, 1, 1, 'F');
+
+                // Angka nilai
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(7.5);
+                doc.setTextColor(30, 41, 59);
+                const display = item.displayValue || `${item.value}`;
+                doc.text(display, barX + barMaxWidth + 3, yPos + 3.2);
+
+                yPos += barHeight + barGap;
+            });
+
+            yPos += 4;
         });
-        finalY += 3;
+    }
+
+    // --- 7. TABEL DATA UTAMA ---
+    if (options.tableHeaders && options.tableData) {
+        autoTable(doc, {
+            startY: yPos,
+            head: [options.tableHeaders],
+            body: options.tableData,
+            theme: 'striped',
+            styles: {
+                font: 'helvetica',
+                fontSize: 7.5,
+                cellPadding: 2.2,
+                textColor: [30, 41, 59],
+            },
+            headStyles: {
+                fillColor: [15, 23, 42],
+                textColor: [255, 255, 255],
+                fontStyle: 'bold',
+                fontSize: 7.5,
+                halign: 'center',
+            },
+            alternateRowStyles: {
+                fillColor: [248, 250, 252],
+            },
+            margin: { left: margin, right: margin },
+        });
+
+        // @ts-ignore
+        yPos = doc.lastAutoTable.finalY + 6;
+    }
+
+    // --- 8. TABEL TAMBAHAN 2 (JIKA ADA) ---
+    if (options.additionalInfoBottom && options.additionalInfoBottom.length > 0) {
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        options.additionalInfoBottom.forEach(info => {
+            if (info === '') {
+                yPos += 1.5;
+            } else if (info.startsWith('B.') || info.startsWith('2.') || info.startsWith('III.') || info.startsWith('IV.')) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(9);
+                doc.setTextColor(15, 23, 42);
+                doc.text(info, margin, yPos);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(8.5);
+                doc.setTextColor(51, 65, 85);
+                yPos += 4;
+            } else {
+                const lines = doc.splitTextToSize(info, pageWidth - margin * 2);
+                doc.text(lines, margin, yPos);
+                yPos += lines.length * 4;
+            }
+        });
+        yPos += 2;
     }
 
     if (options.tableHeadersBottom && options.tableDataBottom) {
         autoTable(doc, {
-            startY: finalY,
+            startY: yPos,
             head: [options.tableHeadersBottom],
             body: options.tableDataBottom,
             theme: 'striped',
             styles: {
                 font: 'helvetica',
-                fontSize: 9,
-                cellPadding: 3,
+                fontSize: 7.2,
+                cellPadding: 2,
+                textColor: [30, 41, 59],
             },
             headStyles: {
-                fillColor: [47, 54, 64],
+                fillColor: [30, 41, 59],
                 textColor: [255, 255, 255],
                 fontStyle: 'bold',
+                fontSize: 7.2,
+                halign: 'center',
+            },
+            alternateRowStyles: {
+                fillColor: [248, 250, 252],
             },
             margin: { left: margin, right: margin },
         });
+
         // @ts-ignore
-        finalY = doc.lastAutoTable.finalY + 15;
-    } else {
-        finalY += 5;
+        yPos = doc.lastAutoTable.finalY + 6;
     }
 
-    // Check if new page is needed for signature
-    if (finalY > doc.internal.pageSize.height - 40) {
+    // --- 9. MULTI SECTIONS ---
+    if (options.sections && options.sections.length > 0) {
+        options.sections.forEach(sec => {
+            if (yPos > pageHeight - 45) {
+                doc.addPage();
+                yPos = margin + 10;
+            }
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(9);
+            doc.setTextColor(15, 23, 42);
+            doc.text(sec.sectionTitle, margin, yPos);
+            yPos += 3.5;
+
+            if (sec.sectionNote) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7.8);
+                doc.setTextColor(100, 116, 139);
+                doc.text(sec.sectionNote, margin, yPos);
+                yPos += 3.5;
+            }
+
+            autoTable(doc, {
+                startY: yPos,
+                head: [sec.headers],
+                body: sec.data,
+                theme: 'striped',
+                styles: {
+                    font: 'helvetica',
+                    fontSize: 7.2,
+                    cellPadding: 2,
+                    textColor: [30, 41, 59],
+                },
+                headStyles: {
+                    fillColor: [15, 23, 42],
+                    textColor: [255, 255, 255],
+                    fontStyle: 'bold',
+                    fontSize: 7.2,
+                    halign: 'center',
+                },
+                alternateRowStyles: {
+                    fillColor: [248, 250, 252],
+                },
+                margin: { left: margin, right: margin },
+            });
+
+            // @ts-ignore
+            yPos = doc.lastAutoTable.finalY + 6;
+        });
+    }
+
+    // --- 10. LEMBAR PENGESAHAN RESMI ---
+    if (yPos > pageHeight - 42) {
         doc.addPage();
-        finalY = margin + 10;
+        yPos = margin + 14;
+    } else {
+        yPos += 4;
     }
 
     const todayDate = new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
     const location = options.appSettings.kop_nama.replace('Pemerintah ', '').replace('Provinsi ', '').replace('Kabupaten ', '');
     const signatureText = `${location}, ${todayDate}`;
 
+    const signBlockW = 65;
+    const signBlockX = pageWidth - margin - signBlockW;
+
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    // Align to right side
-    const rightSideX = pageWidth - margin - 45;
-    doc.text(signatureText, rightSideX, finalY, { align: 'center' });
-    finalY += 25;
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(signatureText, signBlockX + signBlockW / 2, yPos, { align: 'center' });
+    yPos += 4;
+    doc.text('Mengetahui / Mengesahkan,', signBlockX + signBlockW / 2, yPos, { align: 'center' });
+    yPos += 3.8;
+    doc.setFont('helvetica', 'bold');
+    doc.text(options.signerRole, signBlockX + signBlockW / 2, yPos, { align: 'center' });
+    yPos += 20;
 
     doc.setFont('helvetica', 'bold');
-    doc.text(options.signerName, rightSideX, finalY, { align: 'center' });
-    // Underline
+    doc.setFontSize(9.5);
+    doc.text(options.signerName, signBlockX + signBlockW / 2, yPos, { align: 'center' });
     const signerWidth = doc.getTextWidth(options.signerName);
-    doc.line(rightSideX - (signerWidth / 2), finalY + 1, rightSideX + (signerWidth / 2), finalY + 1);
+    doc.setDrawColor(15, 23, 42);
+    doc.setLineWidth(0.4);
+    doc.line(signBlockX + (signBlockW - signerWidth) / 2, yPos + 1, signBlockX + (signBlockW + signerWidth) / 2, yPos + 1);
 
-    finalY += 5;
-    doc.setFont('helvetica', 'normal');
-    doc.text(options.signerRole, rightSideX, finalY, { align: 'center' });
+    // --- 11. FOOTER & NOMOR HALAMAN DI SELURUH LEMBAR ---
+    const totalPages = doc.getNumberOfPages();
+    const startPageNumbering = shouldAddCover ? 2 : 1;
+
+    for (let p = 1; p <= totalPages; p++) {
+        if (p === 1 && shouldAddCover) continue; // Cover page does not need header/footer
+
+        doc.setPage(p);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(148, 163, 184);
+
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.3);
+        doc.line(margin, pageHeight - 11, pageWidth - margin, pageHeight - 11);
+
+        const footerTitle = `${options.appSettings.kop_rs} • Sistem PUAS Eksekutif`;
+        doc.text(footerTitle, margin, pageHeight - 7.5);
+
+        const pageText = `Halaman ${shouldAddCover ? p - 1 : p} dari ${shouldAddCover ? totalPages - 1 : totalPages}`;
+        doc.text(pageText, pageWidth - margin, pageHeight - 7.5, { align: 'right' });
+    }
 
     doc.save(options.filename);
 };
 
+// --- DOKUMENTASI SISTEM & FLOWCHART STANDAR DIAGRAM ALIR LENGKAP (POIN 7) ---
 export interface SystemOverviewOptions {
     appSettings: any;
     printDate: string;
@@ -180,265 +519,366 @@ export const generateSystemOverviewPDF = (options: SystemOverviewOptions) => {
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
-    const margin = 20;
+    const margin = 16;
 
-    const addPageNumber = (pageNumber: number) => {
+    const addFooter = (p: number, total: number) => {
+        doc.setPage(p);
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(8);
-        doc.text(`Halaman ${pageNumber}`, pageWidth / 2, pageHeight - 10, { align: 'center' });
+        doc.setTextColor(148, 163, 184);
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.3);
+        doc.line(margin, pageHeight - 12, pageWidth - margin, pageHeight - 12);
+        doc.text(`${options.appSettings.kop_rs || 'RSUD'} • Dokumentasi Arsitektur Sistem PUAS`, margin, pageHeight - 8);
+        doc.text(`Halaman ${p} dari ${total}`, pageWidth - margin, pageHeight - 8, { align: 'right' });
     };
 
-    // --- COVER PAGE ---
-    // Background decoration
-    doc.setFillColor(47, 54, 64);
-    doc.rect(0, 0, pageWidth, 60, 'F');
+    // ==========================================
+    // HALAMAN 1: COVER RESMI EKSKLUSIF
+    // ==========================================
+    doc.setFillColor(15, 23, 42); // Navy
+    doc.rect(0, 0, pageWidth, 95, 'F');
+    doc.setFillColor(13, 148, 136); // Teal
+    doc.rect(0, 95, pageWidth, 3.5, 'F');
 
-    // Try to add logo on cover
     if (options.appSettings.app_logo && options.appSettings.app_logo.startsWith('data:image')) {
         try {
-            doc.addImage(options.appSettings.app_logo, 'PNG', pageWidth / 2 - 10, 70, 20, 20);
-        } catch (e) {
-            // Silently ignore logo errors
-        }
+            doc.addImage(options.appSettings.app_logo, 'PNG', pageWidth / 2 - 14, 16, 28, 28);
+        } catch (e) { }
     }
 
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(28);
-    doc.text('LAPORAN GAMBARAN UMUM', pageWidth / 2, 35, { align: 'center' });
-    doc.setFontSize(32);
-    doc.text('SISTEM ' + (options.appSettings.app_name || 'PUAS').toUpperCase(), pageWidth / 2, 50, { align: 'center' });
-
-    doc.setTextColor(47, 54, 64);
-    doc.setFontSize(16);
-    doc.text('Sistem Pengelolaan Keluhan & Aduan Masyarakat', pageWidth / 2, 100, { align: 'center' });
+    doc.setFontSize(11);
+    doc.setTextColor(148, 163, 184);
+    doc.text((options.appSettings.kop_nama || 'Pemerintah').toUpperCase(), pageWidth / 2, 53, { align: 'center' });
 
     doc.setFontSize(18);
-    doc.text(options.appSettings.nama_sub_instansi || '', pageWidth / 2, 120, { align: 'center' });
-    doc.text(options.appSettings.nama_instansi || '', pageWidth / 2, 128, { align: 'center' });
+    doc.setTextColor(255, 255, 255);
+    doc.text((options.appSettings.kop_rs || 'RUMAH SAKIT UMUM DAERAH').toUpperCase(), pageWidth / 2, 63, { align: 'center' });
 
-    // Decorative line
-    doc.setDrawColor(47, 54, 64);
-    doc.setLineWidth(1);
-    doc.line(margin, 140, pageWidth - margin, 140);
+    doc.setFontSize(9.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text('BUKU PANDUAN DAN DOKUMENTASI ARSITEKTUR TEKNIS SISTEM', pageWidth / 2, 73, { align: 'center' });
+
+    let cy = 125;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(24);
+    doc.setTextColor(15, 23, 42);
+    doc.text('DOKUMENTASI SISTEM PUAS', pageWidth / 2, cy, { align: 'center' });
+    cy += 10;
+
+    doc.setFontSize(13);
+    doc.setTextColor(71, 85, 105);
+    doc.text('Platform Pengelolaan Aduan, Kepuasan Masyarakat, & Layanan Terpadu', pageWidth / 2, cy, { align: 'center' });
+    cy += 20;
+
+    // Box Info Cover
+    const boxW = 150;
+    const boxH = 45;
+    const boxX = (pageWidth - boxW) / 2;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(203, 213, 225);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(boxX, cy, boxW, boxH, 3, 3, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(100, 116, 139);
+    doc.text('IDENTITAS SISTEM & VERSI DOKUMEN:', boxX + 8, cy + 9);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(12);
-    const dateStr = new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-    doc.text(`Dicetak pada: ${dateStr}`, pageWidth / 2, 150, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setTextColor(30, 41, 59);
+    doc.text(`Nama Platform : Sistem PUAS (Pusat Aduan & Survei)`, boxX + 8, cy + 18);
+    doc.text(`Standar Regulasi: Permenpan RB No. 14 Tahun 2017 & UU No. 25/2009`, boxX + 8, cy + 25);
+    doc.text(`Tanggal Cetak  : ${new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, boxX + 8, cy + 32);
+    doc.text(`Penanggung Jawab: ${options.appSettings.nama_penandatangan || 'Direktur'}`, boxX + 8, cy + 39);
 
-    // Bottom copyright - use app_footer_text if available
-    doc.setFontSize(10);
-    const footerCopyright = options.appSettings.app_footer_text || ('© 2024 ' + (options.appSettings.nama_sub_instansi || 'Tim Developer'));
-    doc.text(footerCopyright, pageWidth / 2, pageHeight - 20, { align: 'center' });
+    doc.setFontSize(9);
+    doc.setTextColor(148, 163, 184);
+    doc.text(`PINTAR PUAS @2026. Mukhsin Hadi. All Right Reserved.`, pageWidth / 2, pageHeight - 16, { align: 'center' });
 
-    // --- PAGE 2: PENDAHULUAN & GAMBARAN UMUM ---
+    // ==========================================
+    // HALAMAN 2: BAB I & BAB II (ARSITEKTUR MENU)
+    // ==========================================
     doc.addPage();
-    addPageNumber(2);
-
-    let y = 25;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('1. Pendahuluan', margin, y);
-    y += 10;
-
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    const introText = `Sistem ${options.appSettings.app_name || 'PUAS'} merupakan platform digital terintegrasi yang dirancang khusus untuk mengelola seluruh alur pengaduan, keluhan, dan aspirasi masyarakat/pengguna layanan di ${options.appSettings.nama_sub_instansi}. Sistem ini bertujuan untuk meningkatkan transparansi, kecepatan respon, dan efisiensi dalam penanganan masalah operasional maupun layanan publik.`;
-    const introLines = doc.splitTextToSize(introText, pageWidth - (margin * 2));
-    doc.text(introLines, margin, y);
-    y += (introLines.length * 6) + 10;
+    let y = 24;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('1.1 Visi & Misi Sistem', margin, y);
+    doc.setTextColor(15, 23, 42);
+    doc.text('BAB I. GAMBARAN UMUM & LANDASAN SISTEM', margin, y);
     y += 8;
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    const visionItems = [
-        '- Mempercepat respon penanganan keluhan melalui notifikasi real-time.',
-        '- Meningkatkan akuntabilitas petugas melalui pelacakan status tiket secara terbuka.',
-        '- Menyediakan data analitik untuk pengambilan keputusan manajemen.',
-        '- Mempermudah masyarakat dalam menyampaikan aduan dari mana saja.'
-    ];
-    visionItems.forEach(item => {
-        doc.text(item, margin + 5, y);
-        y += 6;
-    });
-    y += 5;
+    doc.setFontSize(9.5);
+    doc.setTextColor(51, 65, 85);
+    const bab1Text = `Sistem PUAS merupakan solusi perangkat lunak terintegrasi yang dirancang khusus untuk memfasilitasi komunikasi dua arah antara masyarakat/pengguna layanan dengan seluruh unit kerja di ${options.appSettings.kop_rs || 'instansi'}. Sistem ini dibangun untuk memenuhi standar tata kelola pelayanan publik prima berdasarkan Undang-Undang No. 25 Tahun 2009 tentang Pelayanan Publik dan Peraturan Menteri Pendayagunaan Aparatur Negara dan Reformasi Birokrasi (Permenpan RB) No. 14 Tahun 2017.`;
+    const b1Lines = doc.splitTextToSize(bab1Text, pageWidth - margin * 2);
+    doc.text(b1Lines, margin, y);
+    y += (b1Lines.length * 4.8) + 8;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('1.2 Fitur Utama', margin, y);
-    y += 8;
+    doc.setTextColor(15, 23, 42);
+    doc.text('BAB II. MODUL & STRUKTUR MENU APLIKASI', margin, y);
+    y += 6;
 
-    doc.setFont('helvetica', 'normal');
-    const features = [
-        ['Manajemen Tiket', 'Pencatatan aduan dengan kategori, unit tujuan, dan prioritas.'],
-        ['Pelacakan Real-time', 'Pelapor dapat melihat status aduan menggunakan nomor tiket.'],
-        ['SLA & Eskalasi', 'Kontrol batas waktu pengerjaan otomatis (Service Level Agreement).'],
-        ['Analisis & Laporan', 'Dashboard statistik kepuasan dan performa unit kerja.'],
-        ['Integrasi WhatsApp', 'Notifikasi dan kanal komunikasi langsung ke petugas.']
+    const moduleData = [
+        ['1. Dasbor Utama (/admin)', 'Pusat pantauan metrik real-time: interaksi, tiket aktif, capaian SLA, dan aktivitas terbaru.'],
+        ['2. Tiket & Laporan (/admin/tiket)', 'Manajemen siklus hidup tiket: verifikasi berkas, penugasan unit, respon, eskalasi, dan histori.'],
+        ['3. Analisa Data (/admin/analisa)', 'Kecerdasan bisnis berupa tren bulanan, rasio proporsi kategori, dan visualisasi kinerja.'],
+        ['4. Analisis Kepuasan (/admin/analisis-kepuasan)', 'Evaluasi 11 unsur IKM Permenpan RB, diagram speedometer capaian, dan peringkat kepuasan unit.'],
+        ['5. Laporan Eksekutif (/admin/laporan)', 'Kompilasi rekapitulasi data periodik, filtering dinamis, dan ekspor formal PDF/Excel bertandatangan.'],
+        ['6. Master Unit Kerja (/admin/unit)', 'Pengelolaan data satuan kerja pelayanan, PIC, impor batch via Excel/CSV, dan template upload.'],
+        ['7. Master QR Code (/admin/qrcode)', 'Generator QR Code dinamis per unit kerja (Aduan, Survei, Informasi, Gabungan) dengan unit terkunci.'],
+        ['8. Master Pengguna (/admin/pengguna)', 'Manajemen hak akses role (Superadmin, Admin Unit, Operator) dengan kontrol keamanan terenkripsi.'],
+        ['9. Pengaturan Sistem (/admin/pengaturan)', 'Konfigurasi identitas kop surat, logo, nomor WhatsApp pengaduan, dan dokumentasi arsitektur.']
     ];
 
     autoTable(doc, {
         startY: y,
-        head: [['Fitur', 'Deskripsi']],
-        body: features,
-        theme: 'grid',
-        headStyles: { fillColor: [47, 54, 64] },
-        styles: { fontSize: 10 },
-        margin: { left: margin, right: margin }
-    });
-    // @ts-ignore
-    y = doc.lastAutoTable.finalY + 15;
-
-    // --- PAGE 3: STRUKTUR MENU & ANTARMUKA ---
-    doc.addPage();
-    addPageNumber(3);
-
-    y = 25;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('2. Struktur Menu & Antarmuka', margin, y);
-    y += 10;
-
-    doc.setFontSize(14);
-    doc.text('2.1 Menu Panel Admin', margin, y);
-    y += 8;
-
-    const adminMenus = [
-        ['Dashboard', 'Ringkasan data tiket masuk, status, dan tren mingguan.'],
-        ['Tiket Aduan', 'Pusat pengelolaan tiket (Verifikasi, Penugasan, Respon).'],
-        ['Analisis Kepuasan', 'Grafik penilaian kepuasan dari pelapor setelah tiket selesai.'],
-        ['Laporan & Ekspor', 'Generasi laporan periodik dalam format PDF/Excel.'],
-        ['Manajemen Unit', 'Pengaturan unit kerja yang menangani aduan.'],
-        ['Pengaturan Sistem', 'Konfigurasi identitas, SLA, dan format dokumen.']
-    ];
-
-    autoTable(doc, {
-        startY: y,
-        head: [['Menu Admin', 'Fungsi Utama']],
-        body: adminMenus,
+        head: [['Modul / Menu Sistem', 'Deskripsi Fungsionalitas & Cakupan Layanan']],
+        body: moduleData,
         theme: 'striped',
-        headStyles: { fillColor: [52, 73, 94] },
-        styles: { fontSize: 9 },
+        styles: { font: 'helvetica', fontSize: 8, cellPadding: 2.2 },
+        headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold', fontSize: 8 },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
         margin: { left: margin, right: margin }
     });
-    // @ts-ignore
-    y = doc.lastAutoTable.finalY + 15;
+
+    // ==========================================
+    // HALAMAN 3: BAB III (FLOWCHART STANDAR DIAGRAM ALIR)
+    // ==========================================
+    doc.addPage();
+    y = 24;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('2.2 Alur Antarmuka Pengguna (User Flow)', margin, y);
-    y += 8;
+    doc.setTextColor(15, 23, 42);
+    doc.text('BAB III. STANDAR DIAGRAM ALIR (FLOWCHART) PROSES BISNIS', margin, y);
+    y += 6;
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const flowText = 'Sistem dirancang dengan antarmuka modern dan responsif, dapat diakses melalui Desktop maupun Smartphone dengan nyaman.';
-    doc.text(flowText, margin, y);
-    y += 8;
+    doc.setFontSize(9);
+    doc.setTextColor(71, 85, 105);
+    doc.text('Diagram alir di bawah ini menggunakan simbol baku internasional (ANSI/ISO) untuk menjelaskan alur pengelolaan aduan dan survei:', margin, y);
+    y += 12;
 
-    // Drawing a simple flow diagram using shapes
-    const centerX = pageWidth / 2;
-    const boxW = 40;
-    const boxH = 12;
-
-    const drawBox = (txt: string, x: number, yPos: number, fill: [number, number, number]) => {
-        doc.setFillColor(...fill);
-        doc.roundedRect(x - (boxW / 2), yPos, boxW, boxH, 2, 2, 'F');
+    // Helper Flowchart shapes
+    const drawOval = (txt: string, x: number, yP: number, w: number, h: number, bg: [number, number, number]) => {
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.setDrawColor(30, 41, 59);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(x - w / 2, yP, w, h, h / 2, h / 2, 'FD');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
         doc.setTextColor(255, 255, 255);
-        doc.setFontSize(9);
-        doc.text(txt, x, yPos + 7.5, { align: 'center' });
+        doc.text(txt, x, yP + h / 2 + 1, { align: 'center' });
     };
 
-    drawBox('Input Aduan', centerX - 60, y, [41, 128, 185]);
-    drawBox('Verifikasi', centerX, y, [41, 128, 185]);
-    drawBox('Penanganan', centerX + 60, y, [41, 128, 185]);
+    const drawRect = (txt: string, x: number, yP: number, w: number, h: number, bg: [number, number, number], sub?: string) => {
+        doc.setFillColor(bg[0], bg[1], bg[2]);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.3);
+        doc.roundedRect(x - w / 2, yP, w, h, 2, 2, 'FD');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(7.5);
+        doc.setTextColor(15, 23, 42);
+        doc.text(txt, x, sub ? yP + h / 2 - 1.5 : yP + h / 2 + 1, { align: 'center' });
+        if (sub) {
+            doc.setFont('helvetica', 'normal');
+            doc.setFontSize(6.5);
+            doc.setTextColor(100, 116, 139);
+            doc.text(sub, x, yP + h / 2 + 3, { align: 'center' });
+        }
+    };
 
-    y += 20;
-    doc.setTextColor(47, 54, 64);
-    doc.text('Selesai / Rating', centerX, y + 7.5, { align: 'center' });
-    doc.setDrawColor(47, 54, 64);
-    doc.line(centerX - 10, y + 3, centerX + 10, y + 3);
+    const drawDiamond = (txt: string, x: number, yP: number, size: number) => {
+        const half = size / 2;
+        doc.setFillColor(254, 243, 199); // Amber tint
+        doc.setDrawColor(245, 158, 11);
+        doc.setLineWidth(0.4);
+        // Draw diamond using lines
+        doc.lines([
+            [half, half],
+            [-half, half],
+            [-half, -half],
+            [half, -half]
+        ], x, yP, [1, 1], 'FD', true);
 
-    y += 15;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.8);
+        doc.setTextColor(146, 64, 14);
+        doc.text(txt, x, yP + half + 1, { align: 'center' });
+    };
 
-    // --- PAGE 4: PANDUAN PENGGUNA (MANUAL) ---
-    doc.addPage();
-    addPageNumber(4);
+    const drawArrow = (x1: number, y1: number, x2: number, y2: number, label?: string) => {
+        doc.setDrawColor(71, 85, 105);
+        doc.setLineWidth(0.4);
+        doc.line(x1, y1, x2, y2);
+        // Arrow head
+        if (y2 > y1) {
+            doc.line(x2, y2, x2 - 1.5, y2 - 2.5);
+            doc.line(x2, y2, x2 + 1.5, y2 - 2.5);
+        } else if (x2 > x1) {
+            doc.line(x2, y2, x2 - 2.5, y2 - 1.5);
+            doc.line(x2, y2, x2 - 2.5, y2 + 1.5);
+        }
+        if (label) {
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(6.5);
+            doc.setTextColor(37, 99, 235);
+            doc.text(label, (x1 + x2) / 2 + 2, (y1 + y2) / 2);
+        }
+    };
 
-    y = 25;
+    const cx = pageWidth / 2;
+
+    // Step 1: Start
+    drawOval('MULAI (Masyarakat / Pasien)', cx, y, 55, 9, [15, 23, 42]);
+    drawArrow(cx, y + 9, cx, y + 17);
+    y += 17;
+
+    // Step 2: Input Aduan / Scan QR
+    drawRect('1. Akses Kanal / Pindai QR Code Unit', cx, y, 70, 11, [248, 250, 252], 'Formulir Aduan, Survei IKM, atau Informasi');
+    drawArrow(cx, y + 11, cx, y + 19);
+    y += 19;
+
+    // Step 3: Nomor Tiket & Notifikasi
+    drawRect('2. Sistem Menerbitkan Nomor Tiket Realtime', cx, y, 70, 11, [240, 253, 244], 'Kirim Notifikasi ke Admin & WhatsApp');
+    drawArrow(cx, y + 11, cx, y + 19);
+    y += 19;
+
+    // Step 4: Decision Verifikasi
+    drawDiamond('Valid & Lengkap?', cx, y, 16);
+    drawArrow(cx, y + 16, cx, y + 24, 'Ya');
+    // Cabang Tidak
+    doc.line(cx + 8, y + 8, cx + 55, y + 8);
+    doc.line(cx + 55, y + 8, cx + 55, y + 40);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('3. Panduan Penggunaan (User Manual)', margin, y);
-    y += 10;
+    doc.setFontSize(6.5);
+    doc.setTextColor(220, 38, 38);
+    doc.text('Tidak', cx + 18, y + 6);
+    drawRect('Tiket Ditolak / Klarifikasi', cx + 55, y + 40, 40, 10, [254, 242, 242]);
 
+    y += 24;
+
+    // Step 5: Penanganan Unit
+    drawRect('3. Disposisi & Penanganan Unit Kerja', cx, y, 70, 11, [239, 246, 255], 'Investigasi Lapangan & Perumusan Solusi');
+    drawArrow(cx, y + 11, cx, y + 19);
+    y += 19;
+
+    // Step 6: Decision Butuh Eskalasi?
+    drawDiamond('Butuh Eskalasi?', cx, y, 16);
+    drawArrow(cx, y + 16, cx, y + 24, 'Tuntas');
+    // Cabang Eskalasi
+    doc.line(cx - 8, y + 8, cx - 55, y + 8);
+    doc.line(cx - 55, y + 8, cx - 55, y + 40);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(234, 88, 12);
+    doc.text('Eskalasi', cx - 25, y + 6);
+    drawRect('Eskalasi ke Manajemen / Direksi', cx - 55, y + 40, 42, 10, [255, 247, 237]);
+
+    y += 24;
+
+    // Step 7: Penutupan & Rating CSAT
+    drawRect('4. Tiket Selesai & Umpan Balik Kepuasan', cx, y, 70, 11, [240, 253, 244], 'Pelapor Mengisi Rating CSAT / IKM');
+    drawArrow(cx, y + 11, cx, y + 19);
+    y += 19;
+
+    // Step 8: Selesai
+    drawOval('SELESAI (Arsip Laporan Digital)', cx, y, 55, 9, [13, 148, 136]);
+
+    // ==========================================
+    // HALAMAN 4: BAB IV (METODOLOGI IKM PERMENPAN RB) & PENGESAHAN
+    // ==========================================
+    doc.addPage();
+    y = 24;
+
+    doc.setFont('helvetica', 'bold');
     doc.setFontSize(14);
-    doc.text('3.1 Bagi Pelapor (Masyarakat)', margin, y);
-    y += 8;
+    doc.setTextColor(15, 23, 42);
+    doc.text('BAB IV. FORMULASI PENGUKURAN INDEKS KEPUASAN MASYARAKAT (IKM)', margin, y);
+    y += 6;
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const manualUser = [
-        '1. Akses halaman utama sistem.',
-        '2. Klik tombol "Buat Aduan" atau pilih kategori layanan.',
-        '3. Isi formulir identitas, lokasi, dan deskripsi keluhan secara lengkap.',
-        '4. Unggah foto pendukung jika diperlukan untuk memperjelas aduan.',
-        '5. Simpan Nomor Tiket yang muncul setelah aduan dikirim.',
-        '6. Gunakan menu "Lacak Tiket" untuk memantau progres secara berkala.',
-        '7. Berikan rating bintang 1-5 setelah aduan dinyatakan selesai.'
+    doc.setFontSize(9);
+    doc.setTextColor(51, 65, 85);
+    const ikmExplain = `Berdasarkan Permenpan RB No. 14 Tahun 2017, evaluasi kepuasan diukur melalui 11 unsur pelayanan publik dengan bobot berimbang:`;
+    doc.text(ikmExplain, margin, y);
+    y += 6;
+
+    const ikmTable = [
+        ['U1', 'Persyaratan Pelayanan', 'Kesesuaian berkas dengan standar'],
+        ['U2', 'Kemudahan Prosedur', 'Alur birokrasi yang ringkas'],
+        ['U3', 'Kecepatan Waktu', 'Ketepatan durasi penyelesaian'],
+        ['U4', 'Kewajaran Biaya / Tarif', 'Transparansi retribusi resmi'],
+        ['U5', 'Kesesuaian Produk', 'Kualitas output pelayanan'],
+        ['U6', 'Kompetensi Petugas', 'Kecakapan dan keahlian SDM'],
+        ['U7', 'Perilaku & Kesopanan', 'Keramahan dan etika petugas'],
+        ['U8', 'Sarana & Prasarana', 'Kenyamanan fasilitas pelayanan'],
+        ['U9', 'Penanganan Pengaduan', 'Kecepatan tindak lanjut keluhan'],
+        ['U10', 'Transparansi Layanan', 'Kemudahan akses informasi publik'],
+        ['U11', 'Integritas Petugas', 'Bebas pungli dan gratifikasi']
     ];
-    manualUser.forEach(line => {
-        doc.text(line, margin + 5, y);
-        y += 6;
+
+    autoTable(doc, {
+        startY: y,
+        head: [['Kode', 'Unsur Indikator Layanan', 'Fokus Pengukuran']],
+        body: ikmTable,
+        theme: 'striped',
+        styles: { font: 'helvetica', fontSize: 7.5, cellPadding: 1.8 },
+        headStyles: { fillColor: [15, 23, 42], fontStyle: 'bold' },
+        margin: { left: margin, right: margin }
     });
 
-    y += 10;
+    // @ts-ignore
+    y = doc.lastAutoTable.finalY + 8;
+
+    // Formula Box
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(203, 213, 225);
+    doc.roundedRect(margin, y, pageWidth - margin * 2, 20, 2, 2, 'FD');
+
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text('3.2 Bagi Petugas/Admin', margin, y);
-    y += 8;
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text('RUMUS MATEMATIS KONVERSI IKM:', margin + 4, y + 6);
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(10);
-    const manualAdmin = [
-        '1. Login menggunakan akun yang telah didaftarkan.',
-        '2. Masuk ke menu "Tiket Aduan" untuk melihat daftar tiket baru.',
-        '3. Klik "Detail" untuk memverifikasi keabsahan data aduan.',
-        '4. Klik "Tanggapi/Update" untuk memberikan respon atau solusi.',
-        '5. Pantau indikator SLA (Hijau/Kuning/Merah) untuk prioritas kerja.',
-        '6. Ubah status menjadi "Selesai" jika permasalahan telah tuntas.',
-        '7. Gunakan menu "Laporan" untuk mengunduh rekapitulasi performa bulanan.'
-    ];
-    manualAdmin.forEach(line => {
-        doc.text(line, margin + 5, y);
-        y += 6;
-    });
+    doc.setFontSize(8);
+    doc.setTextColor(51, 65, 85);
+    doc.text('Indeks IKM (Skala 1 - 4) = Total Skor Seluruh Pertanyaan / Total Pertanyaan Terjawab', margin + 4, y + 11);
+    doc.text('Nilai Konversi IKM (Skala 25 - 100) = Indeks IKM * 25 | Mutu A (>=88.31), B (76.61-88.30), C (65-76.60), D (<65)', margin + 4, y + 16);
+    y += 28;
 
-    // --- FINAL PAGE: PENUTUP ---
-    doc.addPage();
-    addPageNumber(5);
-
-    y = 40;
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(18);
-    doc.text('Penutup', pageWidth / 2, y, { align: 'center' });
-    y += 15;
+    // Signature Block
+    const signDate = new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    const signLoc = (options.appSettings.kop_nama || '').replace('Pemerintah ', '').replace('Provinsi ', '').replace('Kabupaten ', '');
+    const signX = pageWidth - margin - 65;
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(11);
-    const closingText = `Demikian gambaran umum sistem ${options.appSettings.app_name || 'PUAS'} ini disusun. Sistem ini akan terus dikembangkan secara berkelanjutan untuk menyesuaikan kebutuhan pelayanan di ${options.appSettings.nama_sub_instansi}.`;
-    const closingLines = doc.splitTextToSize(closingText, pageWidth - (margin * 4));
-    doc.text(closingLines, pageWidth / 2, y, { align: 'center' });
-    y += 30;
-
-    doc.setFontSize(10);
-    doc.text('Sistem Dikembangkan Oleh:', pageWidth / 2, y, { align: 'center' });
-    y += 7;
+    doc.setFontSize(8.5);
+    doc.setTextColor(15, 23, 42);
+    doc.text(`${signLoc}, ${signDate}`, signX + 32, y, { align: 'center' });
+    y += 4;
+    doc.text('Mengesahkan Dokumen Teknis,', signX + 32, y, { align: 'center' });
+    y += 4;
     doc.setFont('helvetica', 'bold');
-    doc.text('TIM TEKNOLOGI INFORMASI', pageWidth / 2, y, { align: 'center' });
+    doc.text(options.appSettings.jabatan_penandatangan || 'Direktur', signX + 32, y, { align: 'center' });
+    y += 18;
 
-    doc.save(`Gambaran_Umum_Sistem_${options.appSettings.app_name || 'PUAS'}.pdf`);
+    doc.text(options.appSettings.nama_penandatangan || 'Dr. Mulyadi Saputra, MARS', signX + 32, y, { align: 'center' });
+    const sWidth = doc.getTextWidth(options.appSettings.nama_penandatangan || 'Dr. Mulyadi Saputra, MARS');
+    doc.line(signX + 32 - sWidth / 2, y + 1, signX + 32 + sWidth / 2, y + 1);
+
+    // Number all pages
+    const totalP = doc.getNumberOfPages();
+    for (let p = 2; p <= totalP; p++) {
+        addFooter(p, totalP);
+    }
+
+    doc.save(`Dokumentasi_Arsitektur_Sistem_${options.appSettings.app_name || 'PUAS'}.pdf`);
 };

@@ -129,6 +129,8 @@ export default function Beranda() {
   const [namaInstansi, setNamaInstansi] = useState('')
   const [openFAQ, setOpenFAQ] = useState<number | null>(null)
   const [greeting, setGreeting] = useState('Selamat Datang')
+  const [qrQuery, setQrQuery] = useState('')
+  const [qrUnitName, setQrUnitName] = useState<string | null>(null)
 
   const [testimonials, setTestimonials] = useState<any[]>([])
   const [isTestimoniOpen, setIsTestimoniOpen] = useState(false)
@@ -142,6 +144,25 @@ export default function Beranda() {
     else if (hour >= 11 && hour < 15) setGreeting('Selamat Siang')
     else if (hour >= 15 && hour < 18) setGreeting('Selamat Sore')
     else setGreeting('Selamat Malam')
+
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search)
+      const uId = params.get('unitId')
+      const lock = params.get('lockUnit')
+      if (uId) {
+        const q = `?unitId=${encodeURIComponent(uId)}${lock ? '&lockUnit=' + encodeURIComponent(lock) : ''}`
+        setQrQuery(q)
+
+        const fetchUnit = async () => {
+          const supabase = createClient()
+          const { data } = await supabase.from('units').select('nama').eq('id', uId).single()
+          if (data?.nama) {
+            setQrUnitName(data.nama)
+          }
+        }
+        fetchUnit()
+      }
+    }
 
     const initData = async () => {
       const supabase = createClient()
@@ -237,6 +258,24 @@ export default function Beranda() {
         {/* ===== WAKTU SHOLAT BAR (Above Menu Layanan) ===== */}
         <PrayerTimesBar />
 
+        {/* ===== QR CODE NOTICE BANNER (if accessed via QR Code) ===== */}
+        {qrUnitName && (
+          <div className="mb-6 p-4 bg-emerald-50 border border-emerald-300 rounded-2xl flex items-center justify-between shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold text-base shadow-sm">
+                📍
+              </div>
+              <div>
+                <p className="text-[10px] font-bold text-emerald-800 uppercase tracking-wider">Unit Layanan Terpilih (Akses QR Code)</p>
+                <p className="text-sm font-black text-emerald-950">{qrUnitName}</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-700 bg-white px-2.5 py-1 rounded-full border border-emerald-200">
+              🔒 Terkunci Otomatis
+            </span>
+          </div>
+        )}
+
         {/* ===== MENU LAYANAN GRID (Stylish, Professional Non-Floating Vector Icons) ===== */}
         <div className="mb-10">
           <div className="flex items-center justify-between mb-4">
@@ -249,8 +288,11 @@ export default function Beranda() {
           <div className="grid grid-cols-3 sm:grid-cols-6 gap-3 sm:gap-4">
             {MENUS.map((menu, idx) => {
               const MenuIcon = menu.icon
+              const targetHref = ['/survei', '/komplain', '/informasi'].includes(menu.href) && qrQuery
+                ? `${menu.href}${qrQuery}`
+                : menu.href
               return (
-                <Link key={idx} href={menu.href} className="outline-none" onClick={() => speak(menu.speech)}>
+                <Link key={idx} href={targetHref} className="outline-none" onClick={() => speak(menu.speech)}>
                   <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}

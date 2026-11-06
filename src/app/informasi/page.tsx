@@ -21,12 +21,33 @@ export default function InformasiPage() {
     const [ticketNumber, setTicketNumber] = useState<string | null>(null)
     const [persetujuan, setPersetujuan] = useState(false)
     const [unitOptions, setUnitOptions] = useState<{ id: string, nama: string }[]>([])
+    const [isUnitLocked, setIsUnitLocked] = useState(false)
+    const [lockedUnitName, setLockedUnitName] = useState('')
 
     useEffect(() => {
         const fetchUnits = async () => {
             const supabase = createClient()
             const { data } = await supabase.from('units').select('id, nama').order('nama')
-            if (data) setUnitOptions(data)
+            if (data) {
+                setUnitOptions(data)
+
+                if (typeof window !== 'undefined') {
+                    const params = new URLSearchParams(window.location.search)
+                    const uId = params.get('unitId')
+                    const lock = params.get('lockUnit') === 'true'
+
+                    if (uId) {
+                        setForm(p => ({ ...p, unitDituju: uId }))
+                        const found = data.find(u => u.id === uId)
+                        if (found) {
+                            setLockedUnitName(found.nama)
+                        }
+                        if (lock) {
+                            setIsUnitLocked(true)
+                        }
+                    }
+                }
+            }
         }
         fetchUnits()
     }, [])
@@ -134,11 +155,27 @@ export default function InformasiPage() {
                                 <input value={form.topikInformasi} onChange={e => set('topikInformasi', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" placeholder="Contoh: Tarif Layanan, Jadwal Dokter, Data Statistik" />
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-slate-600 mb-1 block">Unit Dituju <span className="text-red-500">*</span></label>
-                                <select value={form.unitDituju} onChange={e => set('unitDituju', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-semibold !text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
-                                    <option value="" disabled>Pilih Unit Kerja...</option>
-                                    {unitOptions.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
-                                </select>
+                                <div className="flex items-center justify-between mb-1.5">
+                                    <label className="text-xs font-bold text-slate-600 block">Unit Dituju <span className="text-red-500">*</span></label>
+                                    {isUnitLocked && (
+                                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-300">
+                                            🔒 Terkunci via QR Code
+                                        </span>
+                                    )}
+                                </div>
+                                {isUnitLocked ? (
+                                    <div className="w-full bg-blue-50/70 border border-blue-300 rounded-xl px-4 py-3.5 text-sm font-black text-blue-950 flex items-center justify-between shadow-2xs">
+                                        <span>{lockedUnitName || 'Unit Terpilih'}</span>
+                                        <span className="text-[10px] font-bold text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
+                                            Otomatis
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <select value={form.unitDituju} onChange={e => set('unitDituju', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-semibold !text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all">
+                                        <option value="" disabled>Pilih Unit Kerja...</option>
+                                        {unitOptions.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
+                                    </select>
+                                )}
                             </div>
                             <div>
                                 <label className="text-xs font-bold text-slate-600 mb-2 block">Tujuan Penggunaan <span className="text-red-500">*</span></label>

@@ -22,7 +22,8 @@ import {
     Sparkles,
     Search,
     CheckCircle2,
-    Layers
+    Layers,
+    QrCode
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { createClient } from '@/utils/supabase/client'
@@ -48,6 +49,7 @@ const SIDEBAR_MENUS = [
         group: 'Konfigurasi Sistem',
         items: [
             { name: 'Master Unit Kerja', href: '/admin/unit', icon: Building2, badge: null },
+            { name: 'Master QR Code', href: '/admin/qrcode', icon: QrCode, badge: 'Baru' },
             { name: 'Master Pengguna', href: '/admin/pengguna', icon: Users, badge: null },
             { name: 'Pengaturan Sistem', href: '/admin/pengaturan', icon: Settings, badge: null },
         ]
@@ -110,6 +112,64 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         fetchUserData()
 
+        // 4. Session Keep-Alive and Inactivity Tracker (30 Menit)
+        const isStaySignedIn = typeof window !== 'undefined' && localStorage.getItem('puas_stay_signed_in') === 'true'
+
+        // Record initial activity
+        if (typeof window !== 'undefined' && !localStorage.getItem('puas_last_activity')) {
+            localStorage.setItem('puas_last_activity', Date.now().toString())
+        }
+
+        const updateActivity = () => {
+            if (typeof window !== 'undefined') {
+                localStorage.setItem('puas_last_activity', Date.now().toString())
+            }
+        }
+
+        // Listen for user activity
+        const activityEvents = ['mousedown', 'keydown', 'scroll', 'touchstart', 'mousemove']
+        // Throttle activity updates to once every 10 seconds to avoid performance overhead
+        let lastLoggedActivity = Date.now()
+        const throttledActivity = () => {
+            const now = Date.now()
+            if (now - lastLoggedActivity > 10000) {
+                lastLoggedActivity = now
+                updateActivity()
+            }
+        }
+
+        activityEvents.forEach(evt => window.addEventListener(evt, throttledActivity, { passive: true }))
+
+        // Check inactivity every 20 seconds
+        const IDLE_LIMIT_MS = 30 * 60 * 1000 // 30 Menit
+        const idleInterval = setInterval(async () => {
+            // If stay signed in is checked, do NOT auto-logout due to inactivity
+            if (isStaySignedIn) {
+                // Keep session refreshed periodically
+                await supabase.auth.getSession()
+                return
+            }
+
+            if (typeof window !== 'undefined') {
+                const lastActStr = localStorage.getItem('puas_last_activity')
+                const lastAct = lastActStr ? parseInt(lastActStr, 10) : Date.now()
+                const elapsed = Date.now() - lastAct
+
+                if (elapsed >= IDLE_LIMIT_MS) {
+                    console.log('User inactive for 30 minutes. Auto logging out...')
+                    clearInterval(idleInterval)
+                    localStorage.removeItem('puas_last_activity')
+                    await supabase.auth.signOut()
+                    window.location.href = '/login?timeout=1'
+                } else {
+                    // Sesi masih aktif, refresh token jika perlu
+                    if (elapsed % (5 * 60 * 1000) < 25000) {
+                        await supabase.auth.getSession()
+                    }
+                }
+            }
+        }, 20000)
+
         const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
             if (!session && _event === 'SIGNED_OUT') {
                 router.push('/login')
@@ -117,6 +177,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         })
 
         return () => {
+            activityEvents.forEach(evt => window.removeEventListener(evt, throttledActivity))
+            clearInterval(idleInterval)
             subscription.unsubscribe()
         }
     }, [router, supabase])
@@ -157,6 +219,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     }
 
     const handleLogout = async () => {
+        if (typeof window !== 'undefined') {
+            localStorage.removeItem('puas_stay_signed_in')
+            localStorage.removeItem('puas_last_activity')
+            document.cookie = 'puas_stay_signed_in=; path=/; max-age=0'
+        }
         await supabase.auth.signOut()
         router.push('/login')
     }

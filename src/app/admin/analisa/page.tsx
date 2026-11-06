@@ -173,7 +173,7 @@ export default function AdminAnalisaPage() {
             const periodeText = filterPeriode ? new Date(filterPeriode + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : 'Keseluruhan waktu'
             const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Global'
 
-            const tableHeaders = ['No', 'Kategori Laporan (Jenis Tiket)', 'Jumlah Tiket', 'Persentase'];
+            const tableHeaders = ['No', 'Kategori Laporan (Jenis Tiket)', 'Jumlah Tiket', 'Persentase Beban'];
             const tableData = pieData.map((t, index) => [
                 index + 1,
                 t.name,
@@ -181,34 +181,54 @@ export default function AdminAnalisaPage() {
                 (countTotal > 0 ? Math.round((t.value / countTotal) * 100) : 0) + '%'
             ]);
 
-            const tableHeader2 = ['No', 'Periode Tren (Bulan)', 'Total Interaksi Tiket', 'Tingkat Kesiagaan'];
+            const tableHeader2 = ['No', 'Periode Tren (Bulan)', 'Total Interaksi Tiket', 'Karakteristik Tren'];
             const tableData2 = areaData.map((t, index) => [
                 index + 1,
                 t.name,
                 t.Total,
-                'Normal / Stabil'
+                t.Total > 10 ? 'Volume Tinggi' : 'Stabil / Terkendali'
             ]);
 
             generateFormalPDF({
-                title: 'LAPORAN ANALISIS DATA & PERFORMA LAYANAN (EKSKUTIF)',
-                subtitle: `Periode: ${periodeText} | Unit Kerja: ${unitText}`,
-                additionalInfo: [
-                    'Laporan ini menyajikan rekapitulasi data layanan berdasarkan performa resolusi dan beban interaksi.',
-                    `Metrik Utama: Total Interaksi ${countTotal} Tiket | Penyelesaian ${countSelesai} (${resolveRate}%) | Indeks CSAT Prediktif ${csatSimulated}/5.0`,
-                    '',
-                    'A. Rekapitulasi Berdasarkan Kategori Layanan:'
-                ],
-                filename: `Laporan_Analisa_Komprehensif_${new Date().toISOString().slice(0, 10)}.pdf`,
+                title: 'LAPORAN ANALISIS DATA & TREN PERFORMA LAYANAN',
+                subtitle: `Periode: ${periodeText} • Cakupan Unit: ${unitText} • Evaluasi Eksekutif`,
+                documentNumber: `PUAS/ANL/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
+                filename: `Laporan_Analisa_Data_${new Date().toISOString().slice(0, 10)}.pdf`,
                 appSettings,
                 printDate,
                 signerName,
                 signerRole,
+                includeCoverPage: true,
+                kpiCards: [
+                    { title: 'Total Interaksi', value: countTotal, subtitle: 'Tiket Terdaftar' },
+                    { title: 'Penyelesaian', value: countSelesai, subtitle: 'Telah Dituntaskan' },
+                    { title: 'Persentase Resolusi', value: `${resolveRate}%`, subtitle: 'Tingkat Keberhasilan' },
+                    { title: 'Estimasi CSAT', value: `${csatSimulated}/5.0`, subtitle: 'Kepuasan Layanan' }
+                ],
+                chartSections: [
+                    {
+                        title: 'GRAFIK PROPORSI KATEGORI LAPORAN:',
+                        items: pieData.map((p, idx) => ({
+                            label: p.name,
+                            value: p.value,
+                            max: countTotal || 1,
+                            displayValue: `${p.value} Berkas (${countTotal > 0 ? Math.round((p.value / countTotal) * 100) : 0}%)`,
+                            color: idx === 0 ? [59, 130, 246] : idx === 1 ? [16, 185, 129] : idx === 2 ? [245, 158, 11] : [139, 92, 246]
+                        }))
+                    }
+                ],
+                narrativeIntro: [
+                    'I. RINGKASAN EKSEKUTIF ANALISIS DATA',
+                    `Laporan ini menyajikan analisis komprehensif terhadap pola interaksi masyarakat, pengaduan layanan, dan permohonan informasi di lingkungan ${unitText}.`,
+                    `Sepanjang periode pengamatan tercatat ${countTotal} berkas interaksi dengan tingkat penyelesaian mencapai ${resolveRate}%. Analisis tren menunjukkan dinamika pelaporan terkonsentrasi pada kategori layanan tertentu yang memerlukan atensi perbaikan berkelanjutan.`,
+                    '',
+                    'II. REKAPITULASI BERDASARKAN KATEGORI LAYANAN:'
+                ],
                 tableHeaders,
                 tableData,
-                // Passing a second table explicitly simulating extra content below the first table
                 additionalInfoBottom: [
                     '',
-                    'B. Analisis Tren Pelaporan Bulanan:'
+                    'III. ANALISIS TREN VOLUME PELAPORAN PERIODIK:'
                 ],
                 tableHeadersBottom: tableHeader2,
                 tableDataBottom: tableData2
@@ -385,112 +405,149 @@ export default function AdminAnalisaPage() {
                         </motion.div>
                     </div>
 
-                    {/* Charts Section */}
-                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    {/* Charts Section: Vertically stacked for large, clear, and comprehensive view */}
+                    <div className="space-y-6 mt-6">
 
-                        {/* Area Chart: Tren Volume Masukan */}
-                        <motion.div variants={itemMotion} className="bg-white p-6 rounded-[1.5rem] shadow-sm border border-slate-100 flex flex-col h-[400px]">
-                            <div className="flex justify-between items-center mb-6">
+                        {/* Frame 1: Area Chart: Tren Volume Pelaporan (Full Width) */}
+                        <motion.div variants={itemMotion} className="bg-white p-6 md:p-8 rounded-[1.5rem] shadow-sm border border-slate-100 flex flex-col h-[420px] w-full">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6">
                                 <div>
-                                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                    <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
                                         <TrendingUp className="w-5 h-5 text-blue-500" /> Tren Volume Pelaporan
                                     </h3>
-                                    <p className="text-xs text-slate-500 mt-1">Akumulasi seluruh laporan per bulan</p>
+                                    <p className="text-xs text-slate-500 mt-1">Akumulasi seluruh interaksi dan tiket laporan per bulan secara komprehensif</p>
                                 </div>
-                                <div className="p-2 bg-slate-50 rounded-lg text-slate-400">
-                                    <Calendar className="w-4 h-4" />
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 text-blue-700 rounded-xl text-xs font-bold border border-blue-100">
+                                    <Calendar className="w-4 h-4 text-blue-500" />
+                                    <span>Realtime Akumulasi</span>
                                 </div>
                             </div>
 
-                            <div className="flex-1 w-full">
+                            <div className="flex-1 w-full min-h-[300px]">
                                 {areaData.length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={areaData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                                        <AreaChart data={areaData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                                             <defs>
                                                 <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
-                                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                                                    <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.35} />
+                                                    <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.02} />
                                                 </linearGradient>
                                             </defs>
-                                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b', fontWeight: 600 }} dy={10} />
+                                            <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{ fontSize: 12, fill: '#64748b', fontWeight: 700 }} dy={10} />
                                             <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#64748b' }} />
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                             <RechartsTooltip
-                                                contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
-                                                itemStyle={{ fontWeight: 700, fontSize: '13px' }}
-                                                labelStyle={{ fontWeight: 700, color: '#64748b', fontSize: '12px', marginBottom: '4px' }}
+                                                contentStyle={{ borderRadius: '14px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                                                itemStyle={{ fontWeight: 800, fontSize: '13px' }}
+                                                labelStyle={{ fontWeight: 800, color: '#334155', fontSize: '12px', marginBottom: '4px' }}
                                             />
-                                            <Area type="monotone" dataKey="Total" stroke="#3b82f6" strokeWidth={3} fillOpacity={1} fill="url(#colorTotal)" activeDot={{ r: 6, strokeWidth: 0, fill: '#1d4ed8' }} />
+                                            <Area type="monotone" dataKey="Total" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorTotal)" activeDot={{ r: 7, strokeWidth: 2, stroke: '#ffffff', fill: '#1d4ed8' }} />
                                         </AreaChart>
                                     </ResponsiveContainer>
                                 ) : (
                                     <div className="h-full flex flex-col items-center justify-center text-slate-400">
-                                        <BarChart3 className="w-10 h-10 mb-2 opacity-50" />
-                                        <p className="text-sm font-medium">Data tren belum tersedia cukup memadai.</p>
+                                        <BarChart3 className="w-12 h-12 mb-2 opacity-40 text-blue-500" />
+                                        <p className="text-sm font-semibold">Data tren belum tersedia cukup memadai.</p>
                                     </div>
                                 )}
                             </div>
                         </motion.div>
 
-                        {/* Pie Chart: Distribusi Kategori Laporan */}
-                        <motion.div variants={itemMotion} className="bg-white p-6 rounded-[1.5rem] shadow-sm border border-slate-100 flex flex-col h-[400px]">
-                            <div className="flex justify-between items-center mb-6">
+                        {/* Frame 2: Pie Chart: Rasio Kategori Laporan (Diposisikan di Bawah Frame Tren agar Tampilan Lebih Besar, Jelas, & Lengkap) */}
+                        <motion.div variants={itemMotion} className="bg-white p-6 md:p-8 rounded-[1.5rem] shadow-sm border border-slate-100 flex flex-col w-full">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2 mb-6 pb-4 border-b border-slate-100">
                                 <div>
-                                    <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                                    <h3 className="font-extrabold text-slate-800 text-lg flex items-center gap-2">
                                         <BarChart3 className="w-5 h-5 text-emerald-500" /> Rasio Kategori Laporan
                                     </h3>
-                                    <p className="text-xs text-slate-500 mt-1">Proporsi jenis layanan masuk dalam sistem</p>
+                                    <p className="text-xs text-slate-500 mt-1">Proporsi persebaran jenis layanan dan tiket komplain yang masuk ke sistem</p>
                                 </div>
-                                <div className="p-2 bg-slate-50 rounded-lg text-slate-400">
-                                    <ListFilter className="w-4 h-4" />
+                                <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 text-emerald-700 rounded-xl text-xs font-bold border border-emerald-100">
+                                    <ListFilter className="w-4 h-4 text-emerald-500" />
+                                    <span>Total: {countTotal} Tiket Masuk</span>
                                 </div>
                             </div>
 
-                            <div className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-6">
-                                {pieData.length > 0 ? (
-                                    <>
-                                        <div className="h-48 w-48 shrink-0">
+                            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                                {/* Visual Donut Chart Besar */}
+                                <div className="lg:col-span-5 flex flex-col items-center justify-center p-4">
+                                    {pieData.length > 0 ? (
+                                        <div className="h-64 w-64 relative flex items-center justify-center">
                                             <ResponsiveContainer width="100%" height="100%">
                                                 <PieChart>
                                                     <Pie
                                                         data={pieData}
                                                         cx="50%"
                                                         cy="50%"
-                                                        innerRadius={55}
-                                                        outerRadius={80}
-                                                        paddingAngle={5}
+                                                        innerRadius={68}
+                                                        outerRadius={100}
+                                                        paddingAngle={4}
                                                         dataKey="value"
-                                                        stroke="none"
+                                                        stroke="#ffffff"
+                                                        strokeWidth={3}
                                                     >
-                                                        {pieData.map((entry, index) => (
+                                                        {pieData.map((_entry, index) => (
                                                             <Cell key={"cell-" + index} fill={COLORS[index % COLORS.length]} />
                                                         ))}
                                                     </Pie>
                                                     <RechartsTooltip
-                                                        contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+                                                        contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 8px 16px -4px rgb(0 0 0 / 0.1)' }}
                                                     />
                                                 </PieChart>
                                             </ResponsiveContainer>
+                                            {/* Center Label inside donut */}
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                                <span className="text-3xl font-black text-slate-800">{countTotal}</span>
+                                                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Total Tiket</span>
+                                            </div>
                                         </div>
-                                        <div className="flex-1 w-full space-y-3">
-                                            {pieData.map((entry, index) => (
-                                                <div key={index} className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="w-3 h-3 rounded-full" style={{ backgroundColor: COLORS[index % COLORS.length] }} />
-                                                        <span className="text-xs font-bold text-slate-700">{entry.name}</span>
+                                    ) : (
+                                        <div className="h-48 w-full flex flex-col items-center justify-center text-slate-400">
+                                            <p className="text-sm font-medium">Belum ada distribusi data kategori.</p>
+                                        </div>
+                                    )}
+                                </div>
+
+                                {/* Detail Card Breakdown Lengkap */}
+                                <div className="lg:col-span-7 space-y-3">
+                                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-2">
+                                        Rincian Proporsi & Kontribusi Kategori:
+                                    </h4>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {pieData.map((entry, index) => {
+                                            const pct = countTotal > 0 ? Math.round((entry.value / countTotal) * 100) : 0
+                                            const color = COLORS[index % COLORS.length]
+                                            return (
+                                                <div
+                                                    key={index}
+                                                    className="p-3.5 rounded-2xl border border-slate-100 bg-slate-50/70 hover:bg-slate-50 transition-colors flex flex-col justify-between"
+                                                >
+                                                    <div className="flex items-center justify-between mb-2">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="w-3 h-3 rounded-md shrink-0" style={{ backgroundColor: color }} />
+                                                            <span className="text-xs font-black text-slate-800 truncate" title={entry.name}>
+                                                                {entry.name}
+                                                            </span>
+                                                        </div>
+                                                        <span className="text-xs font-black text-slate-900 bg-white px-2 py-0.5 rounded-md border border-slate-200/80 shadow-xs">
+                                                            {pct}%
+                                                        </span>
                                                     </div>
-                                                    <span className="text-xs font-bold text-slate-500 bg-slate-50 px-2 py-0.5 rounded-md border border-slate-100">
-                                                        {entry.value} Tiket
-                                                    </span>
+                                                    <div className="w-full bg-slate-200/70 h-2 rounded-full overflow-hidden mb-2">
+                                                        <div
+                                                            className="h-full rounded-full transition-all duration-500"
+                                                            style={{ width: `${pct}%`, backgroundColor: color }}
+                                                        />
+                                                    </div>
+                                                    <div className="flex justify-between items-center text-[11px] text-slate-500 font-semibold">
+                                                        <span>Volume Tiket</span>
+                                                        <span className="font-extrabold text-slate-800">{entry.value} Berkas</span>
+                                                    </div>
                                                 </div>
-                                            ))}
-                                        </div>
-                                    </>
-                                ) : (
-                                    <div className="h-full w-full flex flex-col items-center justify-center text-slate-400">
-                                        <p className="text-sm font-medium mt-8">Belum ada distribusi data kategori.</p>
+                                            )
+                                        })}
                                     </div>
-                                )}
+                                </div>
                             </div>
                         </motion.div>
                     </div>

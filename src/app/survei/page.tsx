@@ -64,18 +64,10 @@ export default function SurveiPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [ticketNumber, setTicketNumber] = useState<string | null>(null)
     const [units, setUnits] = useState<any[]>([])
+    const [isUnitLocked, setIsUnitLocked] = useState(false)
+    const [lockedUnitName, setLockedUnitName] = useState('')
 
-    // Fetch master units dynamically!
-    useEffect(() => {
-        const fetchUnits = async () => {
-            const supabase = createClient()
-            const { data } = await supabase.from('units').select('id, nama').order('nama')
-            if (data) setUnits(data)
-        }
-        fetchUnits()
-    }, [])
-
-    const { control, handleSubmit, register, formState: { errors }, watch } = useForm<SurveyFormData>({
+    const { control, handleSubmit, register, formState: { errors }, watch, setValue } = useForm<SurveyFormData>({
         resolver: zodResolver(surveySchema),
         defaultValues: {
             unitId: '',
@@ -90,6 +82,35 @@ export default function SurveiPage() {
             feedback: ''
         }
     })
+
+    // Fetch master units dynamically and check URL QR Code lock!
+    useEffect(() => {
+        const fetchUnits = async () => {
+            const supabase = createClient()
+            const { data } = await supabase.from('units').select('id, nama').order('nama')
+            if (data) {
+                setUnits(data)
+
+                if (typeof window !== 'undefined') {
+                    const params = new URLSearchParams(window.location.search)
+                    const uId = params.get('unitId')
+                    const lock = params.get('lockUnit') === 'true'
+
+                    if (uId) {
+                        setValue('unitId', uId)
+                        const found = data.find(u => u.id === uId)
+                        if (found) {
+                            setLockedUnitName(found.nama)
+                        }
+                        if (lock) {
+                            setIsUnitLocked(true)
+                        }
+                    }
+                }
+            }
+        }
+        fetchUnits()
+    }, [setValue])
 
     const watchAll = watch()
     const ratings = watchAll.ratings || {}
@@ -155,15 +176,33 @@ export default function SurveiPage() {
                             <div className="space-y-6">
                                 {/* Unit Target */}
                                 <div className="space-y-2">
-                                    <label className="text-sm font-bold text-slate-700 flex items-center gap-2 block"><Building className="w-4 h-4 text-emerald-500" /> Unit Layanan yang Dinilai</label>
+                                    <div className="flex items-center justify-between">
+                                        <label className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                                            <Building className="w-4 h-4 text-emerald-500" /> Unit Layanan yang Dinilai
+                                        </label>
+                                        {isUnitLocked && (
+                                            <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                                                🔒 Terkunci via QR Code
+                                            </span>
+                                        )}
+                                    </div>
                                     <Controller
                                         name="unitId"
                                         control={control}
                                         render={({ field }) => (
-                                            <select {...field} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm font-semibold !text-slate-900 outline-none transition-all">
-                                                <option value="" disabled>Pilih Unit Layanan...</option>
-                                                {units.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
-                                            </select>
+                                            isUnitLocked ? (
+                                                <div className="w-full bg-emerald-50/70 border border-emerald-300 rounded-xl px-4 py-3.5 text-sm font-black text-emerald-950 flex items-center justify-between shadow-2xs">
+                                                    <span>{lockedUnitName || 'Unit Terpilih'}</span>
+                                                    <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                                                        Otomatis
+                                                    </span>
+                                                </div>
+                                            ) : (
+                                                <select {...field} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 focus:ring-2 focus:ring-primary/20 focus:border-primary text-sm font-semibold !text-slate-900 outline-none transition-all">
+                                                    <option value="" disabled>Pilih Unit Layanan...</option>
+                                                    {units.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
+                                                </select>
+                                            )
                                         )}
                                     />
                                     {errors.unitId && <p className="text-red-500 text-xs font-bold mt-1">{errors.unitId.message}</p>}

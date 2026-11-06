@@ -37,28 +37,35 @@ export async function updateSession(request: NextRequest) {
                                 request,
                             })
                             cookiesToSet.forEach(({ name, value, options }) =>
-                                supabaseResponse.cookies.set(name, value, options)
+                                supabaseResponse.cookies.set(name, value, {
+                                    ...options,
+                                    path: '/',
+                                    sameSite: 'lax',
+                                })
                             )
                         },
                     },
                 }
             )
 
-            const {
-                data: { user },
-            } = await supabase.auth.getUser()
+            // Refresh session if expired - this will update response cookies via setAll
+            const { data: { user }, error: userError } = await supabase.auth.getUser()
 
-            // If user is null and no valid session is found, redirect to login
             if (!user) {
+                // Check if session fallback exists
                 const { data: { session } } = await supabase.auth.getSession()
-                if (!session) {
+
+                // Only redirect if absolutely no user AND no session exists
+                // AND there's a definite auth error rather than network glitch
+                if (!session && userError?.message?.includes('Invalid')) {
                     const url = request.nextUrl.clone()
                     url.pathname = '/login'
                     return NextResponse.redirect(url)
                 }
             }
         } catch (error) {
-            console.error("Middleware auth check ignored error:", error)
+            console.error("Middleware auth verification notice:", error)
+            // Do not aggressively kick user on transient backend error
         }
     }
 

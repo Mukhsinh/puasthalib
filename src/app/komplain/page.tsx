@@ -26,12 +26,33 @@ export default function KomplainPage() {
     const [isSubmitting, setIsSubmitting] = useState(false)
     const [ticketNumber, setTicketNumber] = useState<string | null>(null)
     const [unitOptions, setUnitOptions] = useState<{ id: string, nama: string }[]>([])
+    const [isUnitLocked, setIsUnitLocked] = useState(false)
+    const [lockedUnitName, setLockedUnitName] = useState('')
 
     useEffect(() => {
         const fetchUnits = async () => {
             const supabase = createClient()
             const { data } = await supabase.from('units').select('id, nama').order('nama')
-            if (data) setUnitOptions(data)
+            if (data) {
+                setUnitOptions(data)
+
+                if (typeof window !== 'undefined') {
+                    const params = new URLSearchParams(window.location.search)
+                    const uId = params.get('unitId')
+                    const lock = params.get('lockUnit') === 'true'
+
+                    if (uId) {
+                        setForm(p => ({ ...p, unitLokasi: uId }))
+                        const found = data.find(u => u.id === uId)
+                        if (found) {
+                            setLockedUnitName(found.nama)
+                        }
+                        if (lock) {
+                            setIsUnitLocked(true)
+                        }
+                    }
+                }
+            }
         }
         fetchUnits()
     }, [])
@@ -183,13 +204,29 @@ export default function KomplainPage() {
                                 </div>
                             </div>
                             <div>
-                                <label className="text-xs font-bold text-slate-600 mb-2 block">Unit / Lokasi yang Dikeluhkan <span className="text-red-500">*</span></label>
-                                <select value={form.unitLokasi} onChange={e => set('unitLokasi', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
-                                    <option value="" disabled>Pilih Unit Kerja...</option>
-                                    {unitOptions.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
-                                    <option value="Lainnya">Lainnya</option>
-                                </select>
-                                {form.unitLokasi === 'Lainnya' && <input value={form.unitLokasiLain} onChange={e => set('unitLokasiLain', e.target.value)} className="mt-2 w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-primary/20" placeholder="Sebutkan lokasi..." />}
+                                <div className="flex items-center justify-between mb-2">
+                                    <label className="text-xs font-bold text-slate-600 block">Unit / Lokasi yang Dikeluhkan <span className="text-red-500">*</span></label>
+                                    {isUnitLocked && (
+                                        <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
+                                            🔒 Terkunci via QR Code
+                                        </span>
+                                    )}
+                                </div>
+                                {isUnitLocked ? (
+                                    <div className="w-full bg-emerald-50/70 border border-emerald-300 rounded-xl px-4 py-3.5 text-sm font-black text-emerald-950 flex items-center justify-between shadow-2xs">
+                                        <span>{lockedUnitName || 'Unit Terpilih'}</span>
+                                        <span className="text-[10px] font-bold text-emerald-700 bg-white px-2 py-0.5 rounded border border-emerald-200">
+                                            Otomatis
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <select value={form.unitLokasi} onChange={e => set('unitLokasi', e.target.value)} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3.5 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all">
+                                        <option value="" disabled>Pilih Unit Kerja...</option>
+                                        {unitOptions.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
+                                        <option value="Lainnya">Lainnya</option>
+                                    </select>
+                                )}
+                                {!isUnitLocked && form.unitLokasi === 'Lainnya' && <input value={form.unitLokasiLain} onChange={e => set('unitLokasiLain', e.target.value)} className="mt-2 w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold text-slate-900 outline-none focus:ring-2 focus:ring-primary/20" placeholder="Sebutkan lokasi..." />}
                             </div>
                             <div className="flex gap-3 mt-6">
                                 <button type="button" onClick={() => setStep(1)} className="px-5 py-3.5 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold hover:bg-slate-50"><ChevronLeft className="w-5 h-5" /></button>
