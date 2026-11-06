@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import {
     Inbox,
@@ -25,7 +25,6 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/utils/cn'
-import * as xlsx from 'xlsx'
 import { generateFormalPDF } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
 
@@ -75,22 +74,31 @@ export default function AdminTiketPage() {
     const fetchData = async () => {
         setIsLoading(true)
 
-        // Settings
-        const settings = await fetchAppSettings(supabase)
-        setAppSettings({
-            kop_nama: settings.kop_nama,
-            kop_rs: settings.kop_rs,
-            kop_alamat: settings.kop_alamat,
-            kop_kontak: settings.kop_kontak,
-            app_logo: settings.app_logo
-        })
-        setSignerName(settings.nama_penandatangan)
-        setSignerRole(settings.jabatan_penandatangan)
-        setWhatsappKontak(settings.whatsapp_kontak)
+        // Run independent queries in parallel
+        const [settings, sessionRes, unitsRes, profilesRes] = await Promise.all([
+            fetchAppSettings(supabase),
+            supabase.auth.getSession(),
+            supabase.from('units').select('id, nama').order('nama'),
+            supabase.from('profiles').select('id, nama_lengkap, role, unit_id').order('nama_lengkap')
+        ])
 
-        // Tickets
-        const { data: { session } } = await supabase.auth.getSession()
+        if (settings) {
+            setAppSettings({
+                kop_nama: settings.kop_nama,
+                kop_rs: settings.kop_rs,
+                kop_alamat: settings.kop_alamat,
+                kop_kontak: settings.kop_kontak,
+                app_logo: settings.app_logo
+            })
+            setSignerName(settings.nama_penandatangan)
+            setSignerRole(settings.jabatan_penandatangan)
+            setWhatsappKontak(settings.whatsapp_kontak)
+        }
 
+        if (unitsRes.data) setUnits(unitsRes.data)
+        if (profilesRes.data) setProfiles(profilesRes.data)
+
+        const session = sessionRes.data?.session
         if (session?.user) {
             const { data: profile } = await supabase
                 .from('profiles')
@@ -113,12 +121,6 @@ export default function AdminTiketPage() {
         } else {
             setTickets([])
         }
-
-        // Units & Profiles for Escalation
-        const { data: unitsData } = await supabase.from('units').select('id, nama').order('nama')
-        setUnits(unitsData || [])
-        const { data: profilesData } = await supabase.from('profiles').select('id, nama_lengkap, role, unit_id').order('nama_lengkap')
-        setProfiles(profilesData || [])
 
         setIsLoading(false)
     }
@@ -209,9 +211,10 @@ export default function AdminTiketPage() {
         setIsUpdating(false);
     }
 
-    const handleExportExcel = () => {
+    const handleExportExcel = async () => {
         setIsGenerating(true)
-        setTimeout(() => {
+        try {
+            const xlsx = await import('xlsx')
             const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
             const exportData = filteredTickets
 
@@ -267,13 +270,16 @@ export default function AdminTiketPage() {
             const workbook = xlsx.utils.book_new()
             xlsx.utils.book_append_sheet(workbook, worksheet, "Tiket_Layanan")
             xlsx.writeFile(workbook, `Laporan_Tiket_${unitText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.xlsx`)
+        } catch (error) {
+            console.error('Excel Export failed:', error)
+        } finally {
             setIsGenerating(false)
-        }, 800)
+        }
     }
 
-    const handleExportPDF = () => {
+    const handleExportPDF = async () => {
         setIsGenerating(true)
-        setTimeout(() => {
+        try {
             const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
             const exportData = filteredTickets
             const totalT = exportData.length
@@ -297,7 +303,7 @@ export default function AdminTiketPage() {
                 ]
             });
 
-            generateFormalPDF({
+            await generateFormalPDF({
                 title: 'LAPORAN REKAPITULASI PENANGANAN TIKET LAYANAN',
                 subtitle: `Unit Kerja: ${unitText} • Status Filter: ${statusFilter} • Evaluasi Real-Time`,
                 documentNumber: `PUAS/TKT/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
@@ -333,41 +339,58 @@ export default function AdminTiketPage() {
                 tableHeaders,
                 tableData
             });
+        } catch (error) {
+            console.error('PDF Export failed:', error)
+        } finally {
             setIsGenerating(false)
-        }, 500)
+        }
     }
 
-    // Filter tickets based on status tab, unit filter & search query
-    const filteredTickets = tickets.filter(t => {
-        const matchesStatus = statusFilter === 'Semua' ? true :
-            statusFilter === 'Menunggu' ? t.status === 'Terkirim' :
-                statusFilter === 'Proses' ? (t.status === 'Diproses' || t.status === 'Proses') :
-                    statusFilter === 'Selesai' ? t.status === 'Selesai' : true
+    // Filter tickets based on status tab, unit filter & search query (Memoized)
+    const filteredTickets = useMemo(() => {
+        return tickets.filter(t => {
+            const matchesStatus = statusFilter === 'Semua' ? true :
+                statusFilter === 'Menunggu' ? t.status === 'Terkirim' :
+                    statusFilter === 'Proses' ? (t.status === 'Diproses' || t.status === 'Proses') :
+                        statusFilter === 'Selesai' ? t.status === 'Selesai' : true
 
-        const matchesUnit = filterUnit === 'Semua' ? true : t.unit_id === filterUnit
+            const matchesUnit = filterUnit === 'Semua' ? true : t.unit_id === filterUnit
 
-        const q = searchQuery.toLowerCase()
-        const reporterName = (t.data_pelapor?.nama || t.data_payload?.nama || '').toLowerCase()
-        const trackingNum = (t.tracking_number || '').toLowerCase()
-        const unitName = (t.units?.nama || '').toLowerCase()
-        const jenisName = (t.jenis || '').toLowerCase()
+            const q = searchQuery.toLowerCase().trim()
+            if (!q) return matchesStatus && matchesUnit
 
-        const matchesSearch = !q || trackingNum.includes(q) || reporterName.includes(q) || unitName.includes(q) || jenisName.includes(q)
+            const reporterName = (t.data_pelapor?.nama || t.data_payload?.nama || '').toLowerCase()
+            const trackingNum = (t.tracking_number || '').toLowerCase()
+            const unitName = (t.units?.nama || '').toLowerCase()
+            const jenisName = (t.jenis || '').toLowerCase()
 
-        return matchesStatus && matchesUnit && matchesSearch
-    })
+            const matchesSearch = trackingNum.includes(q) || reporterName.includes(q) || unitName.includes(q) || jenisName.includes(q)
 
-    const countStatus = (status: string) => {
+            return matchesStatus && matchesUnit && matchesSearch
+        })
+    }, [tickets, statusFilter, filterUnit, searchQuery])
+
+    // Memoize status counts in single pass
+    const statusCounts = useMemo(() => {
         let baseList = tickets
         if (filterUnit !== 'Semua') {
             baseList = tickets.filter(t => t.unit_id === filterUnit)
         }
-        if (status === 'Semua') return baseList.length
-        if (status === 'Menunggu') return baseList.filter(t => t.status === 'Terkirim').length
-        if (status === 'Proses') return baseList.filter(t => t.status === 'Diproses' || t.status === 'Proses').length
-        if (status === 'Selesai') return baseList.filter(t => t.status === 'Selesai').length
-        return 0
-    }
+        const counts: Record<string, number> = {
+            Semua: baseList.length,
+            Menunggu: 0,
+            Proses: 0,
+            Selesai: 0
+        }
+        baseList.forEach(t => {
+            if (t.status === 'Terkirim') counts.Menunggu++
+            else if (t.status === 'Diproses' || t.status === 'Proses') counts.Proses++
+            else if (t.status === 'Selesai') counts.Selesai++
+        })
+        return counts
+    }, [tickets, filterUnit])
+
+    const countStatus = (status: string) => statusCounts[status] ?? 0
 
     const renderDataSection = (title: string, dataObj: any) => {
         if (!dataObj) return null

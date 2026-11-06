@@ -197,8 +197,8 @@ export default function AdminSettingsPage() {
         }
     }
 
-    const handleDownloadSystemReport = () => {
-        generateSystemOverviewPDF({
+    const handleDownloadSystemReport = async () => {
+        await generateSystemOverviewPDF({
             appSettings: settings,
             printDate: new Date().toISOString()
         })

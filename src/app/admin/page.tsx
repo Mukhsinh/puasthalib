@@ -37,28 +37,34 @@ export default async function AdminDashboard() {
         return query
     }
 
-    const { count: countTotal } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }))
-    const { count: countMenunggu } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Terkirim'))
-    const { count: countProses } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Proses'))
-    const { count: countSelesai } = await applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Selesai'))
+    // Execute all dashboard queries in parallel to minimize latency
+    const [
+        { count: countTotal },
+        { count: countMenunggu },
+        { count: countProses },
+        { count: countSelesai },
+        { data: latestTickets },
+        { data: settingsData }
+    ] = await Promise.all([
+        applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true })),
+        applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Terkirim')),
+        applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Proses')),
+        applyUnitFilter(supabase.from('tickets').select('*', { count: 'exact', head: true }).eq('status', 'Selesai')),
+        applyUnitFilter(
+            supabase
+                .from('tickets')
+                .select('*, units!unit_id(nama)')
+                .neq('status', 'Selesai')
+                .order('created_at', { ascending: false })
+                .limit(6)
+        ),
+        supabase.from('app_settings').select('setting_key, setting_value')
+    ])
 
     // Calculate dynamic SLA compliance
     const totalCountVal = countTotal || 0
     const selesaiCountVal = countSelesai || 0
     const slaRate = totalCountVal > 0 ? Math.min(100, Math.round((selesaiCountVal / totalCountVal) * 100)) : 100
-
-    // Fetch latest tickets requiring action
-    const { data: latestTickets } = await applyUnitFilter(
-        supabase
-            .from('tickets')
-            .select('*, units!unit_id(nama)')
-            .neq('status', 'Selesai')
-            .order('created_at', { ascending: false })
-            .limit(6)
-    )
-
-    // Fetch institutional settings for dashboard header
-    const { data: settingsData } = await supabase.from('app_settings').select('setting_key, setting_value')
     const settingsMap: Record<string, string> = {}
     if (settingsData) {
         settingsData.forEach((s: any) => {

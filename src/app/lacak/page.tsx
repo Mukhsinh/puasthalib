@@ -145,7 +145,7 @@ function LacakContent() {
         return `https://wa.me/${number}?text=${encodeURIComponent(text)}`
     }
 
-    const handleDownloadReport = () => {
+    const handleDownloadReport = async () => {
         if (!result || result === 'not_found') return;
 
         const tableData = [
@@ -163,7 +163,7 @@ function LacakContent() {
             h.notes || '-'
         ]);
 
-        generateFormalPDF({
+        await generateFormalPDF({
             title: 'LAPORAN REKAPITULASI PELACAKAN TIKET',
             subtitle: `Nomor Tracking: ${result.nomor}`,
             filename: `Laporan_Lacak_${result.nomor}.pdf`,

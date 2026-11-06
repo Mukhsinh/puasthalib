@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import { BarChart3, TrendingUp, Activity, Download, Layers, Calendar, ListFilter, FileText } from 'lucide-react'
 import {
@@ -8,7 +8,6 @@ import {
     PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts'
 import { motion } from 'framer-motion'
-import * as xlsx from 'xlsx'
 import { generateFormalPDF } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
 
@@ -45,9 +44,14 @@ export default function AdminAnalisaPage() {
 
     useEffect(() => {
         const fetchInitialData = async () => {
-            const { data: { session } } = await supabase.auth.getSession()
+            const [sessionRes, settingsRes] = await Promise.all([
+                supabase.auth.getSession(),
+                fetchAppSettings(supabase)
+            ])
+
             let profileUnitId: string | null = null
             let role = 'user'
+            const session = sessionRes.data?.session
             if (session) {
                 const { data: profile } = await supabase.from('profiles').select('role, unit_id').eq('id', session.user.id).single()
                 if (profile) {
@@ -68,16 +72,17 @@ export default function AdminAnalisaPage() {
             const { data: unitsData } = await unitQuery
             setUnits(unitsData || [])
 
-            const settings = await fetchAppSettings(supabase)
-            setAppSettings({
-                kop_nama: settings.kop_nama,
-                kop_rs: settings.kop_rs,
-                kop_alamat: settings.kop_alamat,
-                kop_kontak: settings.kop_kontak,
-                app_logo: settings.app_logo
-            })
-            setSignerName(settings.nama_penandatangan)
-            setSignerRole(settings.jabatan_penandatangan)
+            if (settingsRes) {
+                setAppSettings({
+                    kop_nama: settingsRes.kop_nama,
+                    kop_rs: settingsRes.kop_rs,
+                    kop_alamat: settingsRes.kop_alamat,
+                    kop_kontak: settingsRes.kop_kontak,
+                    app_logo: settingsRes.app_logo
+                })
+                setSignerName(settingsRes.nama_penandatangan)
+                setSignerRole(settingsRes.jabatan_penandatangan)
+            }
             initialFetchDone.current = true
             fetchTicketsData(role, profileUnitId)
         }
@@ -114,9 +119,46 @@ export default function AdminAnalisaPage() {
         }
     }, [filterUnit, filterPeriode])
 
-    const handleExportExcel = () => {
+    // Memoize metric calculations to avoid expensive recalculations on re-render
+    const { countTotal, countSelesai, resolveRate, csatSimulated, pieData, areaData } = useMemo(() => {
+        const total = tickets.length
+        const selesai = tickets.filter(t => t.status === 'Selesai').length
+        const rate = total > 0 ? Math.round((selesai / total) * 100) : 0
+        const csat = total > 0 ? (4.3 + ((total % 7) * 0.08)).toFixed(1) : '0.0'
+
+        const categoryCounts: Record<string, number> = {}
+        const monthlyCounts: Record<string, number> = {}
+
+        tickets.forEach(t => {
+            categoryCounts[t.jenis] = (categoryCounts[t.jenis] || 0) + 1
+            const month = new Date(t.created_at).toLocaleString('id-ID', { month: 'short' })
+            monthlyCounts[month] = (monthlyCounts[month] || 0) + 1
+        })
+
+        const pData = Object.keys(categoryCounts).map(key => ({
+            name: key.replace('_', ' ').toUpperCase(),
+            value: categoryCounts[key]
+        }))
+
+        const aData = Object.keys(monthlyCounts).map(month => ({
+            name: month,
+            Total: monthlyCounts[month]
+        }))
+
+        return {
+            countTotal: total,
+            countSelesai: selesai,
+            resolveRate: rate,
+            csatSimulated: csat,
+            pieData: pData,
+            areaData: aData
+        }
+    }, [tickets])
+
+    const handleExportExcel = async () => {
         setIsGenerating(true)
-        setTimeout(() => {
+        try {
+            const xlsx = await import('xlsx')
             const periodeText = filterPeriode ? new Date(filterPeriode + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : 'Keseluruhan waktu'
             const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Global'
 
@@ -163,13 +205,16 @@ export default function AdminAnalisaPage() {
             const workbook = xlsx.utils.book_new()
             xlsx.utils.book_append_sheet(workbook, worksheet, "Laporan_Analisa_Eksekutif")
             xlsx.writeFile(workbook, `Laporan_Analisa_Komprehensif_${new Date().toISOString().slice(0, 10)}.xlsx`)
+        } catch (err) {
+            console.error('Export Excel failed:', err)
+        } finally {
             setIsGenerating(false)
-        }, 1000)
+        }
     }
 
-    const handleExportPDF = () => {
+    const handleExportPDF = async () => {
         setIsGenerating(true)
-        setTimeout(() => {
+        try {
             const periodeText = filterPeriode ? new Date(filterPeriode + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : 'Keseluruhan waktu'
             const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Global'
 
@@ -189,7 +234,7 @@ export default function AdminAnalisaPage() {
                 t.Total > 10 ? 'Volume Tinggi' : 'Stabil / Terkendali'
             ]);
 
-            generateFormalPDF({
+            await generateFormalPDF({
                 title: 'LAPORAN ANALISIS DATA & TREN PERFORMA LAYANAN',
                 subtitle: `Periode: ${periodeText} • Cakupan Unit: ${unitText} • Evaluasi Eksekutif`,
                 documentNumber: `PUAS/ANL/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
@@ -233,36 +278,12 @@ export default function AdminAnalisaPage() {
                 tableHeadersBottom: tableHeader2,
                 tableDataBottom: tableData2
             });
+        } catch (err) {
+            console.error('Export PDF failed:', err)
+        } finally {
             setIsGenerating(false)
-        }, 500)
+        }
     }
-
-    // Calculate metrics
-    let countTotal = tickets.length
-    let countSelesai = tickets.filter(t => t.status === 'Selesai').length
-    const resolveRate = countTotal > 0 ? Math.round((countSelesai / countTotal) * 100) : 0
-    const csatSimulated = countTotal > 0 ? (Math.random() * (4.9 - 4.2) + 4.2).toFixed(1) : '0.0'
-
-    // Group by category (Jenis)
-    const categoryCounts: Record<string, number> = {}
-    tickets.forEach(t => {
-        categoryCounts[t.jenis] = (categoryCounts[t.jenis] || 0) + 1
-    })
-    const pieData = Object.keys(categoryCounts).map(key => ({
-        name: key.replace('_', ' ').toUpperCase(),
-        value: categoryCounts[key]
-    }))
-
-    // Group by month (Tren periode)
-    const monthlyCounts: Record<string, number> = {}
-    tickets.forEach(t => {
-        const month = new Date(t.created_at).toLocaleString('id-ID', { month: 'short' })
-        monthlyCounts[month] = (monthlyCounts[month] || 0) + 1
-    })
-    const areaData = Object.keys(monthlyCounts).map(month => ({
-        name: month,
-        Total: monthlyCounts[month]
-    }))
 
     // Define animation variant
     const itemMotion: any = {
@@ -425,7 +446,7 @@ export default function AdminAnalisaPage() {
 
                             <div className="flex-1 w-full min-h-[300px]">
                                 {areaData.length > 0 ? (
-                                    <ResponsiveContainer width="100%" height="100%">
+                                    <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280}>
                                         <AreaChart data={areaData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                                             <defs>
                                                 <linearGradient id="colorTotal" x1="0" y1="0" x2="0" y2="1">
@@ -473,7 +494,7 @@ export default function AdminAnalisaPage() {
                                 <div className="lg:col-span-5 flex flex-col items-center justify-center p-4">
                                     {pieData.length > 0 ? (
                                         <div className="h-64 w-64 relative flex items-center justify-center">
-                                            <ResponsiveContainer width="100%" height="100%">
+                                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280}>
                                                 <PieChart>
                                                     <Pie
                                                         data={pieData}

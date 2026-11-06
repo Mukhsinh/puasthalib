@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import {
     Building2, Plus, Edit, Trash2, X, Save, CheckCircle2,
@@ -10,7 +10,6 @@ import {
 import { cn } from '@/utils/cn'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
-import * as xlsx from 'xlsx'
 import { generateFormalPDF } from '@/utils/pdfExport'
 import { fetchAppSettings, DEFAULT_APP_SETTINGS, AppSettingsData } from '@/utils/appSettings'
 
@@ -134,8 +133,8 @@ export default function AdminUnitPage() {
         setIsSaving(false)
     }
 
-    // --- UNDUH TEMPLATE EXCEL (POIN 6) ---
-    const handleDownloadTemplate = () => {
+    // --- UNDUH TEMPLATE EXCEL ---
+    const handleDownloadTemplate = async () => {
         const templateData = [
             {
                 'Nama Unit Kerja': 'Instalasi Gawat Darurat (IGD)',
@@ -159,6 +158,7 @@ export default function AdminUnitPage() {
             }
         ]
 
+        const xlsx = await import('xlsx')
         const worksheet = xlsx.utils.json_to_sheet(templateData)
         worksheet['!cols'] = [{ wch: 35 }, { wch: 45 }]
         const workbook = xlsx.utils.book_new()
@@ -168,17 +168,17 @@ export default function AdminUnitPage() {
     }
 
     // --- UNDUH LAPORAN MASTER UNIT KERJA (PDF RESMI & EXCEL) ---
-    const handleExportPDF = () => {
+    const handleExportPDF = async () => {
         setIsGenerating(true)
         setIsExportOpen(false)
-        setTimeout(() => {
+        try {
             const printDate = new Date().toISOString()
             const totalUnits = units.length
             const poliUnits = units.filter(u => (u.nama || '').toLowerCase().includes('poli') || (u.nama || '').toLowerCase().includes('rawat')).length
             const instalasiUnits = units.filter(u => (u.nama || '').toLowerCase().includes('instalasi')).length
             const otherUnits = totalUnits - poliUnits - instalasiUnits
 
-            generateFormalPDF({
+            await generateFormalPDF({
                 title: 'LAPORAN MASTER DATA UNIT KERJA & RUANG LAYANAN',
                 subtitle: `Daftar Resmi Inventaris Satuan Kerja, Poliklinik, dan Instalasi Terdaftar • ${appSettings.kop_rs}`,
                 documentNumber: `PUAS/UNT/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
@@ -209,15 +209,19 @@ export default function AdminUnitPage() {
                     new Date(u.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
                 ])
             })
-            setIsGenerating(false)
             showToast('success', 'Laporan PDF Master Unit berhasil diunduh.')
-        }, 300)
+        } catch (error) {
+            console.error('PDF export failed:', error)
+        } finally {
+            setIsGenerating(false)
+        }
     }
 
-    const handleExportExcel = () => {
+    const handleExportExcel = async () => {
         setIsGenerating(true)
         setIsExportOpen(false)
-        setTimeout(() => {
+        try {
+            const xlsx = await import('xlsx')
             const worksheetData = units.map((u, idx) => ({
                 No: idx + 1,
                 'Nama Unit Kerja / Ruangan': u.nama,
@@ -251,19 +255,23 @@ export default function AdminUnitPage() {
             const workbook = xlsx.utils.book_new()
             xlsx.utils.book_append_sheet(workbook, worksheet, "Master_Unit_Kerja")
             xlsx.writeFile(workbook, `Laporan_Master_Unit_Kerja_${new Date().toISOString().slice(0, 10)}.xlsx`)
-            setIsGenerating(false)
             showToast('success', 'Laporan Excel Master Unit berhasil diunduh.')
-        }, 300)
+        } catch (error) {
+            console.error('Excel export failed:', error)
+        } finally {
+            setIsGenerating(false)
+        }
     }
 
-    // --- BACA FILE UPLOAD (POIN 6) ---
+    // --- BACA FILE UPLOAD ---
     const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0]
         if (!file) return
 
         const reader = new FileReader()
-        reader.onload = (evt) => {
+        reader.onload = async (evt) => {
             try {
+                const xlsx = await import('xlsx')
                 const bstr = evt.target?.result
                 const wb = xlsx.read(bstr, { type: 'binary' })
                 const wsname = wb.SheetNames[0]
@@ -296,7 +304,7 @@ export default function AdminUnitPage() {
         reader.readAsBinaryString(file)
     }
 
-    // --- KONFIRMASI SIMPAN IMPORT BATCH KE SUPABASE (POIN 6) ---
+    // --- KONFIRMASI SIMPAN IMPORT BATCH KE SUPABASE ---
     const handleConfirmImport = async () => {
         if (importedPreview.length === 0) return
         setIsImporting(true)
@@ -324,11 +332,14 @@ export default function AdminUnitPage() {
         setIsImporting(false)
     }
 
-    const filteredUnits = units.filter(u => {
-        if (!searchQuery) return true
-        const q = searchQuery.toLowerCase()
-        return (u.nama || '').toLowerCase().includes(q) || (u.deskripsi || '').toLowerCase().includes(q)
-    })
+    const filteredUnits = useMemo(() => {
+        const q = searchQuery.toLowerCase().trim()
+        if (!q) return units
+        return units.filter(u =>
+            (u.nama || '').toLowerCase().includes(q) ||
+            (u.deskripsi && u.deskripsi.toLowerCase().includes(q))
+        )
+    }, [units, searchQuery])
 
     return (
         <div className="space-y-6 relative font-sans">

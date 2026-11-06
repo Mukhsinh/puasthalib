@@ -1,13 +1,12 @@
 'use client'
 
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { motion } from 'framer-motion'
 import {
     FileText, Download, TrendingUp, Users, Star, Award, Heart,
     MessageSquare, Briefcase, Activity, CheckCircle2, Layers,
     PieChart as PieIcon, ShieldCheck, Gauge
 } from 'lucide-react'
-import * as xlsx from 'xlsx'
 import { createClient } from '@/utils/supabase/client'
 import { generateFormalPDF } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
@@ -60,23 +59,29 @@ export default function AnalisisKepuasanPage() {
         const fetchInitialData = async () => {
             setIsLoading(true)
 
-            // 1. Fetch App Settings
-            const settings = await fetchAppSettings(supabase)
-            setAppSettings({
-                kop_nama: settings.kop_nama,
-                kop_rs: settings.kop_rs,
-                kop_alamat: settings.kop_alamat,
-                kop_kontak: settings.kop_kontak,
-                app_logo: settings.app_logo,
-                app_footer_text: settings.app_footer_text
-            })
-            setSignerName(settings.nama_penandatangan)
-            setSignerRole(settings.jabatan_penandatangan)
+            // 1 & 2. Fetch App Settings & Session in parallel
+            const [settings, sessionRes] = await Promise.all([
+                fetchAppSettings(supabase),
+                supabase.auth.getSession()
+            ])
 
-            // 2. Profile Check
-            const { data: { session } } = await supabase.auth.getSession()
+            if (settings) {
+                setAppSettings({
+                    kop_nama: settings.kop_nama,
+                    kop_rs: settings.kop_rs,
+                    kop_alamat: settings.kop_alamat,
+                    kop_kontak: settings.kop_kontak,
+                    app_logo: settings.app_logo,
+                    app_footer_text: settings.app_footer_text
+                })
+                setSignerName(settings.nama_penandatangan)
+                setSignerRole(settings.jabatan_penandatangan)
+            }
+
+            // Profile Check
             let profileUnitId: string | null = null
             let role = 'user'
+            const session = sessionRes.data?.session
             if (session) {
                 const { data: profile } = await supabase.from('profiles').select('role, unit_id').eq('id', session.user.id).single()
                 if (profile) {
@@ -87,277 +92,303 @@ export default function AnalisisKepuasanPage() {
                 }
             }
 
-            // 3. Fetch All Tickets for Operational KPIs (Total Interaksi, Penyelesaian, Resolusi)
+            // 3 & 4. Fetch All Tickets and Surveys concurrently
             let allTicketsQuery = supabase.from('tickets').select('id, jenis, status, unit_id, created_at')
-            if (role === 'user' && profileUnitId) {
-                allTicketsQuery = allTicketsQuery.eq('unit_id', profileUnitId)
-            }
-            const { data: ticketsData } = await allTicketsQuery
-            setAllTickets(ticketsData || [])
-
-            // 4. Fetch Surveys with detailed payload
             let surveyQuery = supabase.from('tickets')
                 .select('*, units!unit_id(nama)')
                 .eq('jenis', 'survei')
                 .order('created_at', { ascending: false })
 
             if (role === 'user' && profileUnitId) {
+                allTicketsQuery = allTicketsQuery.eq('unit_id', profileUnitId)
                 surveyQuery = surveyQuery.eq('unit_id', profileUnitId)
             }
-            const { data: surveyData } = await surveyQuery
-            setRawSurveys(surveyData || [])
+
+            const [ticketsRes, surveyRes] = await Promise.all([
+                allTicketsQuery,
+                surveyQuery
+            ])
+
+            setAllTickets(ticketsRes.data || [])
+            setRawSurveys(surveyRes.data || [])
 
             setIsLoading(false)
         }
         fetchInitialData()
     }, [])
 
-    // --- KALKULASI METRIK OPERASIONAL (TOTAL INTERAKSI, PENYELESAIAN, PERSENTASE RESOLUSI) ---
-    const totalInteraksi = allTickets.length > 0 ? allTickets.length : rawSurveys.length
-    const totalSelesai = allTickets.filter(t => t.status === 'Selesai').length
-    const persentaseResolusi = totalInteraksi > 0
-        ? Math.round((totalSelesai / totalInteraksi) * 100)
-        : (rawSurveys.length > 0 ? 100 : 0)
+    // Memoize all operational and survey metrics to avoid heavy recalculations on re-render
+    const {
+        totalInteraksi,
+        totalSelesai,
+        persentaseResolusi,
+        totalRespondents,
+        tableData,
+        globalAvg,
+        ikmKonversi,
+        csatAvg,
+        predikatMutu,
+        predikatGrade,
+        predikatColor,
+        barChartData,
+        pieChartData,
+        umurChartData,
+        unitRankingData
+    } = useMemo(() => {
+        // Operational metrics
+        const interaksi = allTickets.length > 0 ? allTickets.length : rawSurveys.length
+        const selesai = allTickets.filter(t => t.status === 'Selesai').length
+        const resolusi = interaksi > 0
+            ? Math.round((selesai / interaksi) * 100)
+            : (rawSurveys.length > 0 ? 100 : 0)
 
-    // --- KALKULASI METRIK SURVEI & KAIDAH PERMENPAN RB NO. 14 TAHUN 2017 ---
-    const totalRespondents = rawSurveys.length
+        // Permenpan RB calculations
+        const respondents = rawSurveys.length
+        let totalScoreSum = 0
+        let totalQuestionsAnswered = 0
+        const questionScores = SURVEY_QUESTIONS.map(q => ({ id: q.id, name: q.title, total: 0, count: 0 }))
 
-    let totalScoreSum = 0
-    let totalQuestionsAnswered = 0
-    const questionScores = SURVEY_QUESTIONS.map(q => ({ id: q.id, name: q.title, total: 0, count: 0 }))
+        const pekerjaanCount: Record<string, number> = {}
+        const umurCount: Record<string, number> = {}
+        const unitScores: Record<string, { total: number, count: number }> = {}
 
-    const pekerjaanCount: Record<string, number> = {}
-    const umurCount: Record<string, number> = {}
-    const unitScores: Record<string, { total: number, count: number }> = {}
+        const tData = rawSurveys.map((s, index) => {
+            const payload = s.data_payload || {}
+            let avgRating = 0
 
-    const tableData = rawSurveys.map((s, index) => {
-        const payload = s.data_payload || {}
-        let avgRating = 0
+            if (payload.ratings) {
+                const scores = Object.values(payload.ratings) as number[]
+                if (scores.length > 0) {
+                    const sum = scores.reduce((a, b) => a + b, 0)
+                    avgRating = sum / scores.length
+                    totalScoreSum += sum
+                    totalQuestionsAnswered += scores.length
+                }
 
-        if (payload.ratings) {
-            const scores = Object.values(payload.ratings) as number[]
-            if (scores.length > 0) {
-                const sum = scores.reduce((a, b) => a + b, 0)
-                avgRating = sum / scores.length
-                totalScoreSum += sum
-                totalQuestionsAnswered += scores.length
+                SURVEY_QUESTIONS.forEach((q, i) => {
+                    if (payload.ratings[q.id]) {
+                        questionScores[i].total += payload.ratings[q.id]
+                        questionScores[i].count += 1
+                    }
+                })
             }
 
-            // Agregasi per unsur
-            SURVEY_QUESTIONS.forEach((q, i) => {
-                if (payload.ratings[q.id]) {
-                    questionScores[i].total += payload.ratings[q.id]
-                    questionScores[i].count += 1
-                }
-            })
+            const job = payload.pekerjaan || 'Lainnya'
+            pekerjaanCount[job] = (pekerjaanCount[job] || 0) + 1
+
+            const age = payload.umur || 'Tidak Diketahui'
+            umurCount[age] = (umurCount[age] || 0) + 1
+
+            const unitName = s.units?.nama || 'Unit Pelayanan'
+
+            if (avgRating > 0) {
+                if (!unitScores[unitName]) unitScores[unitName] = { total: 0, count: 0 }
+                unitScores[unitName].total += avgRating
+                unitScores[unitName].count += 1
+            }
+
+            return {
+                no: index + 1,
+                id: s.tracking_number,
+                tanggal: new Date(s.created_at).toLocaleDateString('id-ID'),
+                nama: payload.nama || 'Anonim',
+                umur: age,
+                pekerjaan: job,
+                unit: unitName,
+                skor: avgRating.toFixed(2),
+                feedback: payload.feedback || '-'
+            }
+        })
+
+        // Indeks IKM Skala 1 - 4
+        const ikmIndex = totalQuestionsAnswered > 0 ? totalScoreSum / totalQuestionsAnswered : 0
+        const gAvg = ikmIndex.toFixed(2)
+
+        // Nilai Konversi IKM Skala 25 - 100
+        const konversi = Number((ikmIndex * 25).toFixed(2))
+
+        // Rata-rata CSAT Skala 5.0
+        const csat = ikmIndex > 0 ? ((ikmIndex / 4) * 5.0).toFixed(2) : '0.00'
+
+        let mutu = 'Tidak Baik'
+        let grade = 'D'
+        let color = 'text-rose-600 bg-rose-50 border-rose-200'
+
+        if (konversi >= 88.31) {
+            mutu = 'Sangat Baik'
+            grade = 'A'
+            color = 'text-emerald-700 bg-emerald-50 border-emerald-300'
+        } else if (konversi >= 76.61) {
+            mutu = 'Baik'
+            grade = 'B'
+            color = 'text-blue-700 bg-blue-50 border-blue-300'
+        } else if (konversi >= 65.00) {
+            mutu = 'Kurang Baik'
+            grade = 'C'
+            color = 'text-amber-700 bg-amber-50 border-amber-300'
         }
 
-        const job = payload.pekerjaan || 'Lainnya'
-        pekerjaanCount[job] = (pekerjaanCount[job] || 0) + 1
+        const bChartData = questionScores.map(q => {
+            const skor = q.count > 0 ? Number((q.total / q.count).toFixed(2)) : 0
+            const k = Number((skor * 25).toFixed(1))
+            return {
+                id: q.id,
+                name: q.name,
+                skor: skor,
+                konversi: k,
+                mutu: k >= 88.31 ? 'A' : k >= 76.61 ? 'B' : k >= 65 ? 'C' : 'D'
+            }
+        })
 
-        const age = payload.umur || 'Tidak Diketahui'
-        umurCount[age] = (umurCount[age] || 0) + 1
+        const pChartData = Object.keys(pekerjaanCount).map(key => ({
+            name: key,
+            value: pekerjaanCount[key]
+        }))
 
-        const unitName = s.units?.nama || 'Unit Pelayanan'
+        const uChartData = Object.keys(umurCount).map(key => ({
+            name: key,
+            value: umurCount[key]
+        }))
 
-        if (avgRating > 0) {
-            if (!unitScores[unitName]) unitScores[unitName] = { total: 0, count: 0 }
-            unitScores[unitName].total += avgRating
-            unitScores[unitName].count += 1
+        let uRankingData = Object.keys(unitScores).map(name => ({
+            name,
+            count: unitScores[name].count,
+            skor: unitScores[name].count > 0 ? Number((unitScores[name].total / unitScores[name].count).toFixed(2)) : 0,
+            konversi: unitScores[name].count > 0 ? Number(((unitScores[name].total / unitScores[name].count) * 25).toFixed(1)) : 0
+        })).sort((a, b) => b.skor - a.skor)
+
+        if (rankingFilter === 'top10') {
+            uRankingData = uRankingData.slice(0, 10)
+        } else if (rankingFilter === 'bottom10') {
+            uRankingData = uRankingData.slice(-10).reverse()
         }
 
         return {
-            no: index + 1,
-            id: s.tracking_number,
-            tanggal: new Date(s.created_at).toLocaleDateString('id-ID'),
-            nama: payload.nama || 'Anonim',
-            umur: age,
-            pekerjaan: job,
-            unit: unitName,
-            skor: avgRating.toFixed(2),
-            feedback: payload.feedback || '-'
+            totalInteraksi: interaksi,
+            totalSelesai: selesai,
+            persentaseResolusi: resolusi,
+            totalRespondents: respondents,
+            tableData: tData,
+            globalAvg: gAvg,
+            ikmKonversi: konversi,
+            csatAvg: csat,
+            predikatMutu: mutu,
+            predikatGrade: grade,
+            predikatColor: color,
+            barChartData: bChartData,
+            pieChartData: pChartData,
+            umurChartData: uChartData,
+            unitRankingData: uRankingData
         }
-    })
-
-    // Indeks IKM Skala 1 - 4
-    const ikmIndex = totalQuestionsAnswered > 0 ? totalScoreSum / totalQuestionsAnswered : 0
-    const globalAvg = ikmIndex.toFixed(2)
-
-    // Nilai Konversi IKM Skala 25 - 100 (Indeks IKM x 25 sesuai Permenpan RB)
-    const ikmKonversi = Number((ikmIndex * 25).toFixed(2))
-
-    // Rata-rata CSAT Skala 5.0: (Indeks IKM / 4) * 5.0
-    const csatAvg = ikmIndex > 0 ? ((ikmIndex / 4) * 5.0).toFixed(2) : '0.00'
-
-    // Predikat Mutu Sesuai Permenpan RB No. 14 Tahun 2017:
-    // 88.31 - 100.00 : Sangat Baik (A)
-    // 76.61 - 88.30 : Baik (B)
-    // 65.00 - 76.60 : Kurang Baik (C)
-    // 25.00 - 64.99 : Tidak Baik (D)
-    let predikatMutu = 'Tidak Baik'
-    let predikatGrade = 'D'
-    let predikatColor = 'text-rose-600 bg-rose-50 border-rose-200'
-
-    if (ikmKonversi >= 88.31) {
-        predikatMutu = 'Sangat Baik'
-        predikatGrade = 'A'
-        predikatColor = 'text-emerald-700 bg-emerald-50 border-emerald-300'
-    } else if (ikmKonversi >= 76.61) {
-        predikatMutu = 'Baik'
-        predikatGrade = 'B'
-        predikatColor = 'text-blue-700 bg-blue-50 border-blue-300'
-    } else if (ikmKonversi >= 65.00) {
-        predikatMutu = 'Kurang Baik'
-        predikatGrade = 'C'
-        predikatColor = 'text-amber-700 bg-amber-50 border-amber-300'
-    }
-
-    // Chart Data untuk 11 Unsur
-    const barChartData = questionScores.map(q => {
-        const skor = q.count > 0 ? Number((q.total / q.count).toFixed(2)) : 0
-        const konversi = Number((skor * 25).toFixed(1))
-        return {
-            id: q.id,
-            name: q.name,
-            skor: skor,
-            konversi: konversi,
-            mutu: konversi >= 88.31 ? 'A' : konversi >= 76.61 ? 'B' : konversi >= 65 ? 'C' : 'D'
-        }
-    })
-
-    // Pie Chart Data Demografi Pekerjaan
-    const pieChartData = Object.keys(pekerjaanCount).map(key => ({
-        name: key,
-        value: pekerjaanCount[key]
-    }))
-
-    // Data Demografi Umur
-    const umurChartData = Object.keys(umurCount).map(key => ({
-        name: key,
-        value: umurCount[key]
-    }))
-
-    // Ranking Unit Kerja
-    let unitRankingData = Object.keys(unitScores).map(name => ({
-        name,
-        count: unitScores[name].count,
-        skor: unitScores[name].count > 0 ? Number((unitScores[name].total / unitScores[name].count).toFixed(2)) : 0,
-        konversi: unitScores[name].count > 0 ? Number(((unitScores[name].total / unitScores[name].count) * 25).toFixed(1)) : 0
-    })).sort((a, b) => b.skor - a.skor)
-
-    if (rankingFilter === 'top10') {
-        unitRankingData = unitRankingData.slice(0, 10)
-    } else if (rankingFilter === 'bottom10') {
-        unitRankingData = unitRankingData.slice(-10).reverse()
-    }
+    }, [allTickets, rawSurveys, rankingFilter])
 
     // --- HANDLER EXCEL FORMAL DENGAN KOP & DETAIL LENGKAP ---
-    const handleExportExcel = () => {
+    const handleExportExcel = async () => {
         setIsGenerating(true)
-        setTimeout(() => {
-            try {
-                const worksheet = xlsx.utils.json_to_sheet([])
+        try {
+            const xlsx = await import('xlsx')
+            const worksheet = xlsx.utils.json_to_sheet([])
 
-                // 1. KOP SURAT FORMAL & METADATA RESMI
-                xlsx.utils.sheet_add_aoa(worksheet, [
-                    [appSettings.kop_nama.toUpperCase()],
-                    [appSettings.kop_rs.toUpperCase()],
-                    [`${appSettings.kop_alamat} | ${appSettings.kop_kontak}`],
-                    [],
-                    ['LAPORAN HASIL EVALUASI SURVEI KEPUASAN MASYARAKAT (IKM)'],
-                    ['BERDASARKAN PERMENPAN RB NO. 14 TAHUN 2017'],
-                    [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
-                    [`Penanggung Jawab / Pejabat: ${signerName} (${signerRole})`],
-                    [],
-                    ['RINGKASAN INDIKATOR KUNCI (KEY PERFORMANCE INDICATORS):'],
-                    [`- Total Interaksi Tiket Layanan: ${totalInteraksi} Berkas`],
-                    [`- Laporan / Aduan Berhasil Diselesaikan: ${totalSelesai} Berkas`],
-                    [`- Persentase Resolusi Pelayanan: ${persentaseResolusi}%`],
-                    [`- Total Responden Survei Kepuasan: ${totalRespondents} Orang`],
-                    [`- Indeks Kepuasan Masyarakat (IKM): ${globalAvg} / 4.00`],
-                    [`- Nilai Konversi IKM: ${ikmKonversi} / 100.00`],
-                    [`- Mutu Pelayanan: Mutu ${predikatGrade} (${predikatMutu.toUpperCase()})`],
-                    [`- Estimasi Rata-Rata CSAT: ${csatAvg} / 5.00`],
-                    [],
-                    ['A. REKAPITULASI 11 UNSUR PELAYANAN (PERMENPAN RB NO. 14/2017)']
-                ], { origin: 'A1' })
+            // 1. KOP SURAT FORMAL & METADATA RESMI
+            xlsx.utils.sheet_add_aoa(worksheet, [
+                [appSettings.kop_nama.toUpperCase()],
+                [appSettings.kop_rs.toUpperCase()],
+                [`${appSettings.kop_alamat} | ${appSettings.kop_kontak}`],
+                [],
+                ['LAPORAN HASIL EVALUASI SURVEI KEPUASAN MASYARAKAT (IKM)'],
+                ['BERDASARKAN PERMENPAN RB NO. 14 TAHUN 2017'],
+                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+                [`Penanggung Jawab / Pejabat: ${signerName} (${signerRole})`],
+                [],
+                ['RINGKASAN INDIKATOR KUNCI (KEY PERFORMANCE INDICATORS):'],
+                [`- Total Interaksi Tiket Layanan: ${totalInteraksi} Berkas`],
+                [`- Laporan / Aduan Berhasil Diselesaikan: ${totalSelesai} Berkas`],
+                [`- Persentase Resolusi Pelayanan: ${persentaseResolusi}%`],
+                [`- Total Responden Survei Kepuasan: ${totalRespondents} Orang`],
+                [`- Indeks Kepuasan Masyarakat (IKM): ${globalAvg} / 4.00`],
+                [`- Nilai Konversi IKM: ${ikmKonversi} / 100.00`],
+                [`- Mutu Pelayanan: Mutu ${predikatGrade} (${predikatMutu.toUpperCase()})`],
+                [`- Estimasi Rata-Rata CSAT: ${csatAvg} / 5.00`],
+                [],
+                ['A. REKAPITULASI 11 UNSUR PELAYANAN (PERMENPAN RB NO. 14/2017)']
+            ], { origin: 'A1' })
 
-                // 2. Data Unsur Pelayanan
-                const unsurSheetData = barChartData.map((u, i) => ({
-                    'No': i + 1,
-                    'Unsur Penilaian': u.name,
-                    'Skor Rata-Rata (1-4)': u.skor,
-                    'Nilai Konversi (25-100)': u.konversi,
-                    'Mutu Pelayanan': `Mutu ${u.mutu}`,
-                    'Predikat': u.mutu === 'A' ? 'Sangat Baik' : u.mutu === 'B' ? 'Baik' : u.mutu === 'C' ? 'Kurang Baik' : 'Tidak Baik'
-                }))
-                xlsx.utils.sheet_add_json(worksheet, unsurSheetData, { origin: 'A21' })
+            // 2. Data Unsur Pelayanan
+            const unsurSheetData = barChartData.map((u, i) => ({
+                'No': i + 1,
+                'Unsur Penilaian': u.name,
+                'Skor Rata-Rata (1-4)': u.skor,
+                'Nilai Konversi (25-100)': u.konversi,
+                'Mutu Pelayanan': `Mutu ${u.mutu}`,
+                'Predikat': u.mutu === 'A' ? 'Sangat Baik' : u.mutu === 'B' ? 'Baik' : u.mutu === 'C' ? 'Kurang Baik' : 'Tidak Baik'
+            }))
+            xlsx.utils.sheet_add_json(worksheet, unsurSheetData, { origin: 'A21' })
 
-                // 3. Data Peringkat Unit Kerja
-                const rowAfterUnsur = 23 + unsurSheetData.length
-                xlsx.utils.sheet_add_aoa(worksheet, [
-                    [],
-                    ['B. EVALUASI KEPUASAN BERDASARKAN UNIT KERJA']
-                ], { origin: `A${rowAfterUnsur}` })
+            // 3. Data Peringkat Unit Kerja
+            const rowAfterUnsur = 23 + unsurSheetData.length
+            xlsx.utils.sheet_add_aoa(worksheet, [
+                [],
+                ['B. EVALUASI KEPUASAN BERDASARKAN UNIT KERJA']
+            ], { origin: `A${rowAfterUnsur}` })
 
-                const unitSheetData = unitRankingData.map((u, i) => ({
-                    'Peringkat': i + 1,
-                    'Unit Pelayanan': u.name,
-                    'Total Responden': u.count,
-                    'Indeks IKM (1-4)': u.skor,
-                    'Nilai Konversi': u.konversi,
-                    'Kategori Mutu': u.konversi >= 88.31 ? 'A (Sangat Baik)' : u.konversi >= 76.61 ? 'B (Baik)' : u.konversi >= 65 ? 'C (Kurang)' : 'D (Buruk)'
-                }))
-                xlsx.utils.sheet_add_json(worksheet, unitSheetData, { origin: `A${rowAfterUnsur + 2}` })
+            const unitSheetData = unitRankingData.map((u, i) => ({
+                'Peringkat': i + 1,
+                'Unit Pelayanan': u.name,
+                'Total Responden': u.count,
+                'Indeks IKM (1-4)': u.skor,
+                'Nilai Konversi': u.konversi,
+                'Kategori Mutu': u.konversi >= 88.31 ? 'A (Sangat Baik)' : u.konversi >= 76.61 ? 'B (Baik)' : u.konversi >= 65 ? 'C (Kurang)' : 'D (Buruk)'
+            }))
+            xlsx.utils.sheet_add_json(worksheet, unitSheetData, { origin: `A${rowAfterUnsur + 2}` })
 
-                // 4. Tabulasi Detail Responden
-                const rowAfterUnit = rowAfterUnsur + 4 + unitSheetData.length
-                xlsx.utils.sheet_add_aoa(worksheet, [
-                    [],
-                    ['C. TABULASI DETAIL RESPONDEN DAN SARAN MASUKAN']
-                ], { origin: `A${rowAfterUnit}` })
+            // 4. Tabulasi Detail Responden
+            const rowAfterUnit = rowAfterUnsur + 4 + unitSheetData.length
+            xlsx.utils.sheet_add_aoa(worksheet, [
+                [],
+                ['C. TABULASI DETAIL RESPONDEN DAN SARAN MASUKAN']
+            ], { origin: `A${rowAfterUnit}` })
 
-                const detailSheetData = tableData.map(t => ({
-                    'No': t.no,
-                    'ID Tiket Survei': t.id,
-                    'Tanggal Pengisian': t.tanggal,
-                    'Nama Responden': t.nama,
-                    'Rentang Umur': t.umur,
-                    'Pekerjaan': t.pekerjaan,
-                    'Unit Layanan': t.unit,
-                    'Skor Rata-Rata': t.skor,
-                    'Saran & Masukan Pelayanan': t.feedback
-                }))
-                xlsx.utils.sheet_add_json(worksheet, detailSheetData, { origin: `A${rowAfterUnit + 2}` })
+            const detailSheetData = tableData.map(t => ({
+                'No': t.no,
+                'ID Tiket Survei': t.id,
+                'Tanggal Pengisian': t.tanggal,
+                'Nama Responden': t.nama,
+                'Rentang Umur': t.umur,
+                'Pekerjaan': t.pekerjaan,
+                'Unit Layanan': t.unit,
+                'Skor Rata-Rata': t.skor,
+                'Saran & Masukan Pelayanan': t.feedback
+            }))
+            xlsx.utils.sheet_add_json(worksheet, detailSheetData, { origin: `A${rowAfterUnit + 2}` })
 
-                // Autofit column width
-                worksheet['!cols'] = [
-                    { wch: 6 },
-                    { wch: 30 },
-                    { wch: 20 },
-                    { wch: 22 },
-                    { wch: 18 },
-                    { wch: 20 },
-                    { wch: 25 },
-                    { wch: 15 },
-                    { wch: 45 },
-                ]
+            // Autofit column width
+            worksheet['!cols'] = [
+                { wch: 6 },
+                { wch: 30 },
+                { wch: 20 },
+                { wch: 22 },
+                { wch: 18 },
+                { wch: 20 },
+                { wch: 25 },
+                { wch: 15 },
+                { wch: 45 },
+            ]
 
-                const workbook = xlsx.utils.book_new()
-                xlsx.utils.book_append_sheet(workbook, worksheet, "Laporan_IKM_Formal")
-                xlsx.writeFile(workbook, `Laporan_IKM_Formal_${new Date().toISOString().slice(0, 10)}.xlsx`)
-            } catch (err) {
-                console.error('Export error:', err)
-                alert('Gagal mengekspor data.')
-            }
+            const workbook = xlsx.utils.book_new()
+            xlsx.utils.book_append_sheet(workbook, worksheet, "Laporan_IKM_Formal")
+            xlsx.writeFile(workbook, `Laporan_IKM_Formal_${new Date().toISOString().slice(0, 10)}.xlsx`)
+        } catch (err) {
+            console.error('Export error:', err)
+            alert('Gagal mengekspor data.')
+        } finally {
             setIsGenerating(false)
-        }, 800)
+        }
     }
 
     // --- HANDLER PDF FORMAL DENGAN KOP, GRAFIK VISUAL, SISTEMATIKA LENGKAP ---
-    const handleExportPDF = () => {
+    const handleExportPDF = async () => {
         setIsGenerating(true)
-        setTimeout(() => {
+        try {
             // Unsur Penilaian Table
             const unsurHeaders = ['No', 'Unsur Pelayanan (Permenpan RB)', 'Indeks (1-4)', 'Konversi (100)', 'Mutu', 'Kategori']
             const unsurRows = barChartData.map((u, i) => [
@@ -391,7 +422,7 @@ export default function AnalisisKepuasanPage() {
                 t.feedback
             ])
 
-            generateFormalPDF({
+            await generateFormalPDF({
                 title: 'LAPORAN HASIL EVALUASI SURVEI KEPUASAN MASYARAKAT (IKM)',
                 subtitle: `Pedoman Permenpan RB No. 14 Tahun 2017 • Evaluasi Real-Time Terintegrasi`,
                 documentNumber: `PUAS/IKM/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
@@ -443,9 +474,11 @@ export default function AnalisisKepuasanPage() {
                     }
                 ]
             })
-
+        } catch (err) {
+            console.error('Export PDF failed:', err)
+        } finally {
             setIsGenerating(false)
-        }, 500)
+        }
     }
 
     const itemMotion = {
@@ -709,7 +742,7 @@ export default function AnalisisKepuasanPage() {
                                 <h4 className="text-xs font-black uppercase tracking-wider text-slate-400 mb-2">Sebaran Profesi / Pekerjaan</h4>
                                 {pieChartData.length > 0 ? (
                                     <div className="h-60 w-60 relative flex items-center justify-center">
-                                        <ResponsiveContainer width="100%" height="100%">
+                                        <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={280}>
                                             <PieChart>
                                                 <Pie
                                                     data={pieChartData}
@@ -844,7 +877,7 @@ export default function AnalisisKepuasanPage() {
 
                         {/* Bar Chart 11 Unsur Lengkap */}
                         <div className="h-[320px] w-full pt-2">
-                            <ResponsiveContainer width="100%" height="100%">
+                            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                                 <BarChart data={barChartData} margin={{ top: 20, right: 20, left: -10, bottom: 60 }}>
                                     <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
                                     <XAxis
@@ -906,7 +939,7 @@ export default function AnalisisKepuasanPage() {
 
                         <div className="h-[340px] w-full">
                             {unitRankingData.length > 0 ? (
-                                <ResponsiveContainer width="100%" height="100%">
+                                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={240}>
                                     <BarChart data={unitRankingData} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }}>
                                         <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
                                         <XAxis type="number" domain={[0, 4]} tick={{ fontSize: 11, fill: '#64748b' }} axisLine={false} tickLine={false} />

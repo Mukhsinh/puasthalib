@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import {
     QrCode, Download, Printer, ExternalLink, Building2, Check,
@@ -9,7 +9,6 @@ import {
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import QRCode from 'qrcode'
-import jsPDF from 'jspdf'
 import { fetchAppSettings } from '@/utils/appSettings'
 
 type QRType = 'all' | 'survei' | 'komplain' | 'informasi'
@@ -36,20 +35,25 @@ export default function MasterQRCodePage() {
     useEffect(() => {
         const initData = async () => {
             setIsLoading(true)
-            const settings = await fetchAppSettings(supabase)
-            setAppSettings({
-                kop_nama: settings.kop_nama,
-                kop_rs: settings.kop_rs,
-                kop_alamat: settings.kop_alamat,
-                kop_kontak: settings.kop_kontak,
-                app_logo: settings.app_logo,
-                app_name: settings.app_name || 'PUAS'
-            })
+            const [settings, unitsRes] = await Promise.all([
+                fetchAppSettings(supabase),
+                supabase.from('units').select('*').order('nama', { ascending: true })
+            ])
 
-            const { data } = await supabase.from('units').select('*').order('nama', { ascending: true })
-            if (data && data.length > 0) {
-                setUnits(data)
-                setSelectedUnit(data[0])
+            if (settings) {
+                setAppSettings({
+                    kop_nama: settings.kop_nama,
+                    kop_rs: settings.kop_rs,
+                    kop_alamat: settings.kop_alamat,
+                    kop_kontak: settings.kop_kontak,
+                    app_logo: settings.app_logo,
+                    app_name: settings.app_name || 'PUAS'
+                })
+            }
+
+            if (unitsRes.data && unitsRes.data.length > 0) {
+                setUnits(unitsRes.data)
+                setSelectedUnit(unitsRes.data[0])
             }
             setIsLoading(false)
         }
@@ -112,9 +116,10 @@ export default function MasterQRCodePage() {
     }
 
     // Download / Cetak Kartu Display Meja Akrilik (PDF Resmi A4/A5)
-    const handleDownloadStandCardPDF = () => {
+    const handleDownloadStandCardPDF = async () => {
         if (!qrDataUrl || !selectedUnit) return
 
+        const { default: jsPDF } = await import('jspdf')
         const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' })
         const pageWidth = doc.internal.pageSize.width
         const pageHeight = doc.internal.pageSize.height
@@ -297,10 +302,11 @@ export default function MasterQRCodePage() {
         doc.save(`Stand_QR_${qrType.toUpperCase()}_${cleanName}.pdf`)
     }
 
-    const filteredUnits = units.filter(u => {
-        if (!searchQuery) return true
-        return (u.nama || '').toLowerCase().includes(searchQuery.toLowerCase())
-    })
+    const filteredUnits = useMemo(() => {
+        const q = searchQuery.toLowerCase().trim()
+        if (!q) return units
+        return units.filter(u => (u.nama || '').toLowerCase().includes(q))
+    }, [units, searchQuery])
 
     const QR_TYPES: { id: QRType; title: string; desc: string; icon: any; color: string; bg: string }[] = [
         {

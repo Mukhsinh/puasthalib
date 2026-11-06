@@ -74,21 +74,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             const { data: { session } } = await supabase.auth.getSession()
             if (!session?.user) return
 
-            // 1. Profile
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('*, units!unit_id(nama)')
-                .eq('id', session.user.id)
-                .single()
+            // 1 & 2. Fetch Profile and Settings concurrently
+            const [profileRes, settingsRes] = await Promise.all([
+                supabase.from('profiles').select('*, units!unit_id(nama)').eq('id', session.user.id).single(),
+                supabase.from('app_settings').select('setting_key, setting_value').in('setting_key', ['app_name', 'app_logo'])
+            ])
+
+            const profile = profileRes.data
             if (profile) setUserProfile(profile)
 
-            // 2. Settings (app_name + app_logo)
-            const { data: settingsArr } = await supabase
-                .from('app_settings')
-                .select('setting_key, setting_value')
-                .in('setting_key', ['app_name', 'app_logo'])
-            if (settingsArr) {
-                settingsArr.forEach((s: any) => {
+            if (settingsRes.data) {
+                settingsRes.data.forEach((s: any) => {
                     if (s.setting_key === 'app_name' && s.setting_value) setAppName(s.setting_value)
                     if (s.setting_key === 'app_logo' && s.setting_value) setAppLogo(s.setting_value)
                 })

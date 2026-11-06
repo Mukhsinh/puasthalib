@@ -1,6 +1,3 @@
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-
 export interface PDFExportOptions {
     title: string;
     subtitle?: string;
@@ -45,7 +42,9 @@ export interface PDFExportOptions {
     tableDataBottom?: any[][];
 }
 
-export const generateFormalPDF = (options: PDFExportOptions) => {
+export const generateFormalPDF = async (options: PDFExportOptions) => {
+    const { default: jsPDF } = await import('jspdf');
+    const { default: autoTable } = await import('jspdf-autotable');
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
@@ -555,7 +554,9 @@ export interface SystemOverviewOptions {
     printDate: string;
 }
 
-export const generateSystemOverviewPDF = (options: SystemOverviewOptions) => {
+export const generateSystemOverviewPDF = async (options: SystemOverviewOptions) => {
+    const { default: jsPDF } = await import('jspdf');
+    const { default: autoTable } = await import('jspdf-autotable');
     const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
