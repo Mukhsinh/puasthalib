@@ -57,16 +57,20 @@ export const generateFormalPDF = (options: PDFExportOptions) => {
     if (shouldAddCover) {
         // Background Header Navy
         doc.setFillColor(15, 23, 42);
-        doc.rect(0, 0, pageWidth, 75, 'F');
+        doc.rect(0, 0, pageWidth, 76, 'F');
 
-        // Decorative Accent Line
+        // Decorative Accent Line (Teal & Emerald dual-accent)
         doc.setFillColor(13, 148, 136); // teal
-        doc.rect(0, 75, pageWidth, 3, 'F');
+        doc.rect(0, 76, pageWidth, 2.5, 'F');
+        doc.setFillColor(16, 185, 129); // emerald
+        doc.rect(0, 78.5, pageWidth, 1, 'F');
 
         // Logo
         if (options.appSettings.app_logo && options.appSettings.app_logo.startsWith('data:image')) {
             try {
-                doc.addImage(options.appSettings.app_logo, 'PNG', pageWidth / 2 - 12, 12, 24, 24);
+                doc.setFillColor(255, 255, 255);
+                doc.roundedRect(pageWidth / 2 - 13, 9, 26, 26, 4, 4, 'F');
+                doc.addImage(options.appSettings.app_logo, 'PNG', pageWidth / 2 - 11, 11, 22, 22);
             } catch (e) { }
         }
 
@@ -79,58 +83,94 @@ export const generateFormalPDF = (options: PDFExportOptions) => {
         doc.setTextColor(255, 255, 255);
         doc.text(options.appSettings.kop_rs.toUpperCase(), pageWidth / 2, 53, { align: 'center' });
 
-        doc.setFontSize(9);
+        doc.setFontSize(8.5);
         doc.setTextColor(203, 213, 225);
         doc.text('SISTEM INFORMASI & EVALUASI LAYANAN PUBLIK TERPADU (PUAS)', pageWidth / 2, 62, { align: 'center' });
 
-        // Middle Title Box
-        let cy = 105;
+        // Middle Title Section
+        let cy = 104;
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(20);
+        doc.setFontSize(18);
         doc.setTextColor(15, 23, 42);
         const titleLines = doc.splitTextToSize(options.title.toUpperCase(), pageWidth - margin * 3);
         doc.text(titleLines, pageWidth / 2, cy, { align: 'center' });
-        cy += (titleLines.length * 8) + 6;
+        cy += (titleLines.length * 7.5) + 3;
+
+        // Elegant Teal Accent Underline
+        doc.setFillColor(13, 148, 136);
+        doc.roundedRect(pageWidth / 2 - 18, cy, 36, 1.2, 0.6, 0.6, 'F');
+        cy += 7;
 
         if (options.subtitle) {
             doc.setFont('helvetica', 'normal');
-            doc.setFontSize(11);
+            doc.setFontSize(10);
             doc.setTextColor(71, 85, 105);
             const subLines = doc.splitTextToSize(options.subtitle, pageWidth - margin * 3);
             doc.text(subLines, pageWidth / 2, cy, { align: 'center' });
-            cy += (subLines.length * 6) + 12;
+            cy += (subLines.length * 5.5) + 14;
+        } else {
+            cy += 14;
         }
 
-        // Formal Metadata Box
-        const boxW = 160;
-        const boxH = 46;
-        const boxX = (pageWidth - boxW) / 2;
+        // Formal Metadata Section (FRAMELESS MODERN EXECUTIVE ACCENT CARD)
+        const metaW = 154;
+        const metaH = 48;
+        const metaX = (pageWidth - metaW) / 2;
 
+        // Subtle soft background without outline/border
         doc.setFillColor(248, 250, 252);
-        doc.setDrawColor(203, 213, 225);
-        doc.setLineWidth(0.4);
-        doc.roundedRect(boxX, cy, boxW, boxH, 2.5, 2.5, 'FD');
+        doc.roundedRect(metaX, cy, metaW, metaH, 3, 3, 'F');
+
+        // Elegant left vertical accent bar
+        doc.setFillColor(13, 148, 136);
+        doc.roundedRect(metaX, cy, 3.5, metaH, 1.5, 1.5, 'F');
+
+        // Header inside metadata
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(13, 148, 136);
+        doc.text('INFORMASI REGISTRASI DOKUMEN RESMI', metaX + 10, cy + 9);
+
+        // Subtle separator hairline
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.3);
+        doc.line(metaX + 10, cy + 12, metaX + metaW - 8, cy + 12);
+
+        // Key-Value Rows
+        const colLabelX = metaX + 10;
+        const colValX = metaX + 54;
+        const docNum = options.documentNumber || `PUAS/LAP/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/001`;
+
+        const metaRows = [
+            { label: 'Nomor Dokumen', value: `:  ${docNum}` },
+            { label: 'Tanggal Cetak', value: `:  ${new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}` },
+            { label: 'Pejabat Pengesah', value: `:  ${options.signerName}` },
+            { label: 'Jabatan', value: `:  ${options.signerRole}` }
+        ];
+
+        metaRows.forEach((row, rIdx) => {
+            const rowY = cy + 19 + (rIdx * 7);
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8.5);
+            doc.setTextColor(100, 116, 139);
+            doc.text(row.label, colLabelX, rowY);
+
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(8.5);
+            doc.setTextColor(15, 23, 42);
+            doc.text(row.value, colValX, rowY);
+        });
+
+        // Bottom Cover Footer
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8);
+        doc.setTextColor(148, 163, 184);
+        doc.text('Dokumen ini diterbitkan secara sah dan terekam dalam pangkalan data Sistem PUAS.', pageWidth / 2, pageHeight - 19, { align: 'center' });
 
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(8.5);
-        doc.setTextColor(100, 116, 139);
-        doc.text('INFORMASI REGISTRASI DOKUMEN:', boxX + 8, cy + 8);
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(30, 41, 59);
-
-        const docNum = options.documentNumber || `PUAS/LAP/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/001`;
-        doc.text(`Nomor Dokumen  : ${docNum}`, boxX + 8, cy + 16);
-        doc.text(`Tanggal Cetak   : ${new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, boxX + 8, cy + 23);
-        doc.text(`Pejabat Pengesah: ${options.signerName}`, boxX + 8, cy + 30);
-        doc.text(`Jabatan         : ${options.signerRole}`, boxX + 8, cy + 37);
-
-        // Bottom Cover Footer
-        doc.setFontSize(8.5);
-        doc.setTextColor(148, 163, 184);
-        const footerInstansi = `${options.appSettings.kop_rs} • Portal PUAS Eksekutif © ${new Date().getFullYear()}`;
-        doc.text(footerInstansi, pageWidth / 2, pageHeight - 16, { align: 'center' });
+        const footerInstansi = `${options.appSettings.kop_rs.toUpperCase()} • PORTAL EKSEKUTIF © ${new Date().getFullYear()}`;
+        doc.text(footerInstansi, pageWidth / 2, pageHeight - 14, { align: 'center' });
 
         // Add page for content
         doc.addPage();

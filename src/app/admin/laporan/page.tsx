@@ -179,7 +179,7 @@ export default function LaporanEksportPage() {
                     [appSettings.kop_rs.toUpperCase()],
                     [`${appSettings.kop_alamat} | ${appSettings.kop_kontak}`],
                     [],
-                    ['LAPORAN REKAPITULASI LAYANAN, PENGADUAN, DAN SURVEI (EKSKUTIF)'],
+                    ['LAPORAN REKAPITULASI LAYANAN, PENGADUAN, DAN SURVEI (EKSEKUTIF)'],
                     [`Periode: ${periodeText} | Unit: ${unitText} | Kategori: ${filterJenis}`],
                     [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
                     [`Penanggung Jawab: ${signerName} (${signerRole})`],
@@ -296,7 +296,7 @@ export default function LaporanEksportPage() {
             ])
 
             generateFormalPDF({
-                title: 'LAPORAN REKAPITULASI LAYANAN DAN PERFORMA (EKSKUTIF)',
+                title: 'LAPORAN REKAPITULASI LAYANAN DAN PERFORMA (EKSEKUTIF)',
                 subtitle: `Periode: ${periodeText} • Unit Kerja: ${unitText} • Kategori: ${filterJenis}`,
                 documentNumber: `PUAS/LAP/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
                 filename: `Laporan_Eksekutif_PUAS_${new Date().toISOString().slice(0, 10)}.pdf`,

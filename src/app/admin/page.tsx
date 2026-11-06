@@ -57,6 +57,19 @@ export default async function AdminDashboard() {
             .limit(6)
     )
 
+    // Fetch institutional settings for dashboard header
+    const { data: settingsData } = await supabase.from('app_settings').select('setting_key, setting_value')
+    const settingsMap: Record<string, string> = {}
+    if (settingsData) {
+        settingsData.forEach((s: any) => {
+            if (s.setting_key && s.setting_value) settingsMap[s.setting_key] = s.setting_value
+        })
+    }
+    const appLogo = settingsMap['app_logo'] || ''
+    const appName = settingsMap['app_name'] || 'PUAS'
+    const namaSubInstansi = settingsMap['nama_sub_instansi'] || 'RSUD Mayjen H.A Thalib'
+    const namaInstansi = settingsMap['nama_instansi'] || 'Pemerintah Kota Sungai Penuh'
+
     const STATS = [
         {
             label: 'Total Tiket Masuk',
@@ -94,6 +107,39 @@ export default async function AdminDashboard() {
 
     return (
         <div className="space-y-8 pb-10 font-sans">
+            {/* Executive Welcome & Institutional Header with Logo */}
+            <div className="bg-white rounded-3xl p-6 sm:p-7 border border-slate-200/90 shadow-sm relative overflow-hidden flex flex-col sm:flex-row items-start sm:items-center justify-between gap-5">
+                <div className="flex items-center gap-4 relative z-10">
+                    {appLogo ? (
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-white p-2 border border-slate-200/90 shadow-md shrink-0 flex items-center justify-center">
+                            <img src={appLogo} alt="Logo" className="w-full h-full object-contain" />
+                        </div>
+                    ) : (
+                        <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-500 text-white shadow-md flex items-center justify-center font-black text-2xl shrink-0">
+                            <Building2 className="w-8 h-8" />
+                        </div>
+                    )}
+                    <div>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-black uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200">
+                                {namaInstansi}
+                            </span>
+                        </div>
+                        <h1 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight mt-1">
+                            {namaSubInstansi}
+                        </h1>
+                        <p className="text-xs sm:text-sm font-semibold text-slate-500 mt-0.5">
+                            Panel Dasbor Eksekutif • Sistem Informasi & Evaluasi Layanan Terpadu ({appName})
+                        </p>
+                    </div>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-bold self-end sm:self-center">
+                    <span className="px-3.5 py-2 rounded-xl bg-slate-50 text-slate-600 border border-slate-200/80 font-bold">
+                        {new Date().toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                    </span>
+                </div>
+            </div>
+
             {/* KPI Metric Cards Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
                 {STATS.map((stat, idx) => (

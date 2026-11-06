@@ -120,58 +120,79 @@ export default function MasterQRCodePage() {
         const pageHeight = doc.internal.pageSize.height
         const margin = 16
 
-        // 1. Decorative Outer Border Frame
+        // 1. Decorative Outer Border Frame (Modern Executive Dual Frame)
         doc.setDrawColor(15, 23, 42)
-        doc.setLineWidth(1.5)
+        doc.setLineWidth(1.4)
         doc.roundedRect(margin, margin, pageWidth - margin * 2, pageHeight - margin * 2, 4, 4, 'S')
 
         doc.setDrawColor(13, 148, 136) // teal inner line
-        doc.setLineWidth(0.5)
+        doc.setLineWidth(0.6)
         doc.roundedRect(margin + 2.5, margin + 2.5, pageWidth - margin * 2 - 5, pageHeight - margin * 2 - 5, 3, 3, 'S')
 
+        // Corner decorative accent notches
+        const cLen = 7
+        doc.setDrawColor(16, 185, 129) // emerald
+        doc.setLineWidth(1.2)
+        // Top-left
+        doc.line(margin + 4, margin + 4, margin + 4 + cLen, margin + 4)
+        doc.line(margin + 4, margin + 4, margin + 4, margin + 4 + cLen)
+        // Top-right
+        doc.line(pageWidth - margin - 4 - cLen, margin + 4, pageWidth - margin - 4, margin + 4)
+        doc.line(pageWidth - margin - 4, margin + 4, pageWidth - margin - 4, margin + 4 + cLen)
+        // Bottom-left
+        doc.line(margin + 4, pageHeight - margin - 4, margin + 4 + cLen, pageHeight - margin - 4)
+        doc.line(margin + 4, pageHeight - margin - 4, margin + 4, pageHeight - margin - 4 - cLen)
+        // Bottom-right
+        doc.line(pageWidth - margin - 4 - cLen, pageHeight - margin - 4, pageWidth - margin - 4, pageHeight - margin - 4)
+        doc.line(pageWidth - margin - 4, pageHeight - margin - 4, pageWidth - margin - 4, pageHeight - margin - 4 - cLen)
+
         // 2. KOP SURAT ATAS
-        let y = margin + 12
+        let y = margin + 8
 
         if (appSettings.app_logo && appSettings.app_logo.startsWith('data:image')) {
             try {
-                doc.addImage(appSettings.app_logo, 'PNG', pageWidth / 2 - 12, y, 24, 24)
-                y += 28
+                // White circular/rounded container for crisp contrast
+                doc.setFillColor(255, 255, 255)
+                doc.roundedRect(pageWidth / 2 - 13, y, 26, 26, 4, 4, 'F')
+                doc.addImage(appSettings.app_logo, 'PNG', pageWidth / 2 - 11, y + 2, 22, 22)
+                y += 29
             } catch (e) {
-                y += 6
+                y += 4
             }
         } else {
-            y += 6
+            y += 4
         }
 
         doc.setFont('helvetica', 'bold')
-        doc.setFontSize(12)
+        doc.setFontSize(11)
         doc.setTextColor(71, 85, 105)
         doc.text(appSettings.kop_nama.toUpperCase(), pageWidth / 2, y, { align: 'center' })
-        y += 6
+        y += 5.5
 
-        doc.setFontSize(17)
+        doc.setFontSize(16)
         doc.setTextColor(15, 23, 42)
         doc.text(appSettings.kop_rs.toUpperCase(), pageWidth / 2, y, { align: 'center' })
-        y += 6
+        y += 5
 
         doc.setFont('helvetica', 'normal')
-        doc.setFontSize(9)
+        doc.setFontSize(8.5)
         doc.setTextColor(100, 116, 139)
         doc.text(appSettings.kop_alamat, pageWidth / 2, y, { align: 'center' })
-        y += 8
+        y += 7
 
-        // Double Separator Line
+        // Double Separator Line (Navy + Teal)
         doc.setDrawColor(15, 23, 42)
         doc.setLineWidth(0.8)
         doc.line(margin + 8, y, pageWidth - margin - 8, y)
         y += 1
-        doc.setLineWidth(0.2)
+        doc.setDrawColor(13, 148, 136)
+        doc.setLineWidth(0.3)
         doc.line(margin + 8, y, pageWidth - margin - 8, y)
-        y += 14
+        y += 12
 
-        // 3. JUDUL LAYANAN & BADGE
+        // 3. JUDUL LAYANAN & BADGE PILL
         let serviceTitle = 'KANAL LAYANAN TERPADU'
-        let serviceDesc = 'Pengaduan, Survei Kepuasan Masyarakat, & Permintaan Informasi'
+        let serviceDesc = 'Pengaduan Pasien, Survei Kepuasan (IKM), & Permintaan Informasi'
         let badgeBg: [number, number, number] = [15, 23, 42]
 
         if (qrType === 'survei') {
@@ -188,47 +209,70 @@ export default function MasterQRCodePage() {
             badgeBg = [37, 99, 235] // blue
         }
 
-        // Badge pill
+        // Stylish Badge pill with text 'SILAKAN PINDAI KODE QR '
+        const badgeW = 88
+        const badgeH = 8
         doc.setFillColor(badgeBg[0], badgeBg[1], badgeBg[2])
-        doc.roundedRect(pageWidth / 2 - 45, y, 90, 8, 4, 4, 'F')
+        doc.roundedRect(pageWidth / 2 - badgeW / 2, y, badgeW, badgeH, 4, 4, 'F')
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(8.5)
         doc.setTextColor(255, 255, 255)
-        doc.text('PINDAI KODE QR LOKET RESMI', pageWidth / 2, y + 5.5, { align: 'center' })
-        y += 16
+        doc.text('SILAKAN PINDAI KODE QR ', pageWidth / 2, y + 5.5, { align: 'center' })
+        y += 15
 
-        // Unit Name Highlight
+        // Unit Name Highlight (Bold & Modern)
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(22)
         doc.setTextColor(15, 23, 42)
         doc.text(selectedUnit.nama.toUpperCase(), pageWidth / 2, y, { align: 'center' })
-        y += 7
+        y += 6.5
+
+        doc.setFont('helvetica', 'bold')
+        doc.setFontSize(10)
+        doc.setTextColor(13, 148, 136)
+        doc.text(serviceTitle, pageWidth / 2, y, { align: 'center' })
+        y += 4.5
 
         doc.setFont('helvetica', 'normal')
-        doc.setFontSize(10)
-        doc.setTextColor(71, 85, 105)
-        doc.text(serviceTitle, pageWidth / 2, y, { align: 'center' })
-        y += 5
         doc.setFontSize(8)
-        doc.setTextColor(148, 163, 184)
+        doc.setTextColor(100, 116, 139)
         doc.text(serviceDesc, pageWidth / 2, y, { align: 'center' })
-        y += 12
+        y += 10
 
-        // 4. QR CODE IMAGE BOX
-        const qrSize = 90
+        // 4. QR CODE IMAGE BOX WITH HIGH-TECH CORNER BRACKETS
+        const qrSize = 88
         const qrBoxX = (pageWidth - qrSize) / 2
 
-        doc.setFillColor(255, 255, 255)
-        doc.setDrawColor(203, 213, 225)
-        doc.setLineWidth(0.5)
-        doc.roundedRect(qrBoxX - 4, y - 4, qrSize + 8, qrSize + 8, 4, 4, 'FD')
+        // Clean background card with subtle elevation
+        doc.setFillColor(248, 250, 252)
+        doc.setDrawColor(226, 232, 240)
+        doc.setLineWidth(0.4)
+        doc.roundedRect(qrBoxX - 5, y - 5, qrSize + 10, qrSize + 10, 4, 4, 'FD')
 
         doc.addImage(qrDataUrl, 'PNG', qrBoxX, y, qrSize, qrSize)
-        y += qrSize + 12
+
+        // Scanner Corner Target Brackets (Teal)
+        const bLen = 8
+        doc.setDrawColor(13, 148, 136)
+        doc.setLineWidth(1.2)
+        // Top-left
+        doc.line(qrBoxX - 2, y - 2, qrBoxX - 2 + bLen, y - 2)
+        doc.line(qrBoxX - 2, y - 2, qrBoxX - 2, y - 2 + bLen)
+        // Top-right
+        doc.line(qrBoxX + qrSize + 2 - bLen, y - 2, qrBoxX + qrSize + 2, y - 2)
+        doc.line(qrBoxX + qrSize + 2, y - 2, qrBoxX + qrSize + 2, y - 2 + bLen)
+        // Bottom-left
+        doc.line(qrBoxX - 2, y + qrSize + 2, qrBoxX - 2 + bLen, y + qrSize + 2)
+        doc.line(qrBoxX - 2, y + qrSize + 2, qrBoxX - 2, y + qrSize + 2 - bLen)
+        // Bottom-right
+        doc.line(qrBoxX + qrSize + 2 - bLen, y + qrSize + 2, qrBoxX + qrSize + 2, y + qrSize + 2)
+        doc.line(qrBoxX + qrSize + 2, y + qrSize + 2, qrBoxX + qrSize + 2, y + qrSize + 2 - bLen)
+
+        y += qrSize + 14
 
         // 5. INSTRUCTION & FOOTER
         doc.setFont('helvetica', 'bold')
-        doc.setFontSize(10)
+        doc.setFontSize(9.5)
         doc.setTextColor(15, 23, 42)
         doc.text('PETUNJUK PENGGUNAAN:', pageWidth / 2, y, { align: 'center' })
         y += 5.5
@@ -236,18 +280,18 @@ export default function MasterQRCodePage() {
         doc.setFont('helvetica', 'normal')
         doc.setFontSize(8.5)
         doc.setTextColor(71, 85, 105)
-        doc.text('1. Buka kamera HP atau aplikasi pemindai QR Code Anda.', pageWidth / 2, y, { align: 'center' })
+        doc.text('1. Buka kamera ponsel pintar atau aplikasi pemindai QR Code Anda.', pageWidth / 2, y, { align: 'center' })
         y += 4.5
-        doc.text('2. Arahkan lensa ke kode QR di atas hingga link muncul.', pageWidth / 2, y, { align: 'center' })
+        doc.text('2. Arahkan lensa ke kode QR di atas hingga tautan terdeteksi.', pageWidth / 2, y, { align: 'center' })
         y += 4.5
-        doc.text(`3. Formulir akan otomatis terbuka khusus untuk unit ${selectedUnit.nama}.`, pageWidth / 2, y, { align: 'center' })
-        y += 12
+        doc.text(`3. Formulir layanan akan terbuka secara otomatis khusus untuk unit ${selectedUnit.nama}.`, pageWidth / 2, y, { align: 'center' })
+        y += 11
 
         // Guarantee Tagline
         doc.setFont('helvetica', 'bold')
         doc.setFontSize(8)
         doc.setTextColor(13, 148, 136)
-        doc.text('Aspirasi Anda Sangat Berharga Demi Peningkatan Kualitas Pelayanan Publik', pageWidth / 2, pageHeight - margin - 10, { align: 'center' })
+        doc.text('Aspirasi & Masukan Anda Sangat Berharga Demi Peningkatan Mutu Pelayanan', pageWidth / 2, pageHeight - margin - 8, { align: 'center' })
 
         const cleanName = selectedUnit.nama.replace(/[^a-zA-Z0-9]/g, '_')
         doc.save(`Stand_QR_${qrType.toUpperCase()}_${cleanName}.pdf`)

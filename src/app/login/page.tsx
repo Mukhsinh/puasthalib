@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 export default function LoginPage() {
     const [isLoading, setIsLoading] = useState(false)
     const [appName, setAppName] = useState('PUAS')
+    const [appLogo, setAppLogo] = useState('')
     const [errorMessage, setErrorMessage] = useState('')
     const [timeoutMessage, setTimeoutMessage] = useState('')
     const [email, setEmail] = useState('')
@@ -33,15 +34,19 @@ export default function LoginPage() {
             }
         }
 
-        const fetchAppName = async () => {
+        const fetchAppSettings = async () => {
             const { data } = await supabase
                 .from('app_settings')
-                .select('setting_value')
-                .eq('setting_key', 'app_name')
-                .single()
-            if (data?.setting_value) setAppName(data.setting_value)
+                .select('setting_key, setting_value')
+                .in('setting_key', ['app_name', 'app_logo'])
+            if (data) {
+                data.forEach((item: any) => {
+                    if (item.setting_key === 'app_name' && item.setting_value) setAppName(item.setting_value)
+                    if (item.setting_key === 'app_logo' && item.setting_value) setAppLogo(item.setting_value)
+                })
+            }
         }
-        fetchAppName()
+        fetchAppSettings()
     }, [supabase])
 
     const handleLogin = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -99,9 +104,15 @@ export default function LoginPage() {
             >
                 {/* Header */}
                 <div className="text-center mb-8">
-                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-teal-500 text-white shadow-lg shadow-blue-500/20 mb-4">
-                        <ShieldCheck className="w-9 h-9" />
-                    </div>
+                    {appLogo ? (
+                        <div className="inline-flex items-center justify-center w-20 h-20 rounded-2xl bg-white p-2.5 shadow-xl shadow-slate-200/80 border border-slate-200/90 mb-4 transition-transform hover:scale-105">
+                            <img src={appLogo} alt={appName} className="w-full h-full object-contain" />
+                        </div>
+                    ) : (
+                        <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-tr from-blue-600 to-teal-500 text-white shadow-lg shadow-blue-500/20 mb-4">
+                            <ShieldCheck className="w-9 h-9" />
+                        </div>
+                    )}
                     <h1 className="text-2xl font-black text-slate-900 tracking-tight">Portal Administrasi</h1>
                     <p className="text-slate-500 font-medium text-xs mt-1">
                         Sistem Layanan Pengaduan & Survei {appName}

@@ -4,12 +4,15 @@ import React, { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/utils/supabase/client'
 import {
     Building2, Plus, Edit, Trash2, X, Save, CheckCircle2,
-    AlertCircle, Search, Upload, Download, FileSpreadsheet, Check
+    AlertCircle, Search, Upload, Download, FileSpreadsheet, Check,
+    FileText, ChevronDown, Printer
 } from 'lucide-react'
 import { cn } from '@/utils/cn'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
 import * as xlsx from 'xlsx'
+import { generateFormalPDF } from '@/utils/pdfExport'
+import { fetchAppSettings, DEFAULT_APP_SETTINGS, AppSettingsData } from '@/utils/appSettings'
 
 export default function AdminUnitPage() {
     const [units, setUnits] = useState<any[]>([])
@@ -22,7 +25,11 @@ export default function AdminUnitPage() {
     const [searchQuery, setSearchQuery] = useState('')
     const [saveMessage, setSaveMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
     const [importedPreview, setImportedPreview] = useState<{ nama: string; deskripsi: string }[]>([])
+    const [appSettings, setAppSettings] = useState<AppSettingsData>(DEFAULT_APP_SETTINGS)
+    const [isExportOpen, setIsExportOpen] = useState(false)
+    const [isGenerating, setIsGenerating] = useState(false)
     const fileInputRef = useRef<HTMLInputElement>(null)
+    const exportDropdownRef = useRef<HTMLDivElement>(null)
     const supabase = createClient()
     const router = useRouter()
 
@@ -52,8 +59,20 @@ export default function AdminUnitPage() {
                 }
             }
             fetchUnits()
+            const settings = await fetchAppSettings(supabase)
+            if (settings) {
+                setAppSettings(settings)
+            }
         }
         checkAuth()
+
+        const handleClickOutside = (e: MouseEvent) => {
+            if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
+                setIsExportOpen(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
     }, [])
 
     const handleOpenModal = (unit?: any) => {
@@ -146,6 +165,95 @@ export default function AdminUnitPage() {
         xlsx.utils.book_append_sheet(workbook, worksheet, "Template_Unit")
         xlsx.writeFile(workbook, "Template_Import_Unit_Kerja.xlsx")
         showToast('success', 'Template Excel berhasil diunduh.')
+    }
+
+    // --- UNDUH LAPORAN MASTER UNIT KERJA (PDF RESMI & EXCEL) ---
+    const handleExportPDF = () => {
+        setIsGenerating(true)
+        setIsExportOpen(false)
+        setTimeout(() => {
+            const printDate = new Date().toISOString()
+            const totalUnits = units.length
+            const poliUnits = units.filter(u => (u.nama || '').toLowerCase().includes('poli') || (u.nama || '').toLowerCase().includes('rawat')).length
+            const instalasiUnits = units.filter(u => (u.nama || '').toLowerCase().includes('instalasi')).length
+            const otherUnits = totalUnits - poliUnits - instalasiUnits
+
+            generateFormalPDF({
+                title: 'LAPORAN MASTER DATA UNIT KERJA & RUANG LAYANAN',
+                subtitle: `Daftar Resmi Inventaris Satuan Kerja, Poliklinik, dan Instalasi Terdaftar • ${appSettings.kop_rs}`,
+                documentNumber: `PUAS/UNT/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
+                filename: `Laporan_Master_Unit_Kerja_${new Date().toISOString().slice(0, 10)}.pdf`,
+                appSettings,
+                printDate,
+                signerName: appSettings.nama_penandatangan || 'dr. Rofi Irman, Sp.PD, FINASIM',
+                signerRole: appSettings.jabatan_penandatangan || 'Direktur Utama',
+                includeCoverPage: true,
+                kpiCards: [
+                    { title: 'Total Unit Terdaftar', value: totalUnits, subtitle: 'Ruang Layanan Aktif' },
+                    { title: 'Poli & Rawat Inap', value: poliUnits, subtitle: 'Layanan Medis Langsung' },
+                    { title: 'Instalasi Penunjang', value: instalasiUnits, subtitle: 'Penunjang Medis' },
+                    { title: 'Manajemen & Loket', value: otherUnits > 0 ? otherUnits : 0, subtitle: 'Administrasi & Humas' },
+                ],
+                narrativeIntro: [
+                    'I. RINGKASAN EKSEKUTIF INVENTARIS UNIT KERJA',
+                    `Laporan resmi ini memuat rekapitulasi inventaris data seluruh unit kerja, poliklinik, instalasi kedaruratan, laboratorium, farmasi, serta ruang rawat inap yang telah terintegrasi dalam pangkalan data Sistem PUAS pada ${appSettings.kop_rs}.`,
+                    `Setiap unit kerja telah dilengkapi dengan token identifikasi digital unik serta master QR Code meja/loket untuk memfasilitasi survei kepuasan masyarakat mandiri dan kanal pelaporan komplain pasien.`,
+                    '',
+                    'II. TABULASI MASTER DATA UNIT KERJA & RUANG LAYANAN:'
+                ],
+                tableHeaders: ['No', 'Nama Unit Kerja / Ruangan', 'Deskripsi / Lokasi Layanan', 'Tanggal Registrasi'],
+                tableData: units.map((u, idx) => [
+                    idx + 1,
+                    u.nama,
+                    u.deskripsi || '—',
+                    new Date(u.created_at).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })
+                ])
+            })
+            setIsGenerating(false)
+            showToast('success', 'Laporan PDF Master Unit berhasil diunduh.')
+        }, 300)
+    }
+
+    const handleExportExcel = () => {
+        setIsGenerating(true)
+        setIsExportOpen(false)
+        setTimeout(() => {
+            const worksheetData = units.map((u, idx) => ({
+                No: idx + 1,
+                'Nama Unit Kerja / Ruangan': u.nama,
+                'Deskripsi / Lokasi Layanan': u.deskripsi || '—',
+                'Tanggal Registrasi': new Date(u.created_at).toLocaleDateString('id-ID')
+            }))
+
+            const worksheet = xlsx.utils.json_to_sheet([])
+
+            xlsx.utils.sheet_add_aoa(worksheet, [
+                [appSettings.kop_nama.toUpperCase()],
+                [appSettings.kop_rs.toUpperCase()],
+                [appSettings.kop_alamat],
+                [appSettings.kop_kontak],
+                [''],
+                ['LAPORAN MASTER DATA UNIT KERJA DAN RUANG LAYANAN'],
+                [`Tanggal Unduh: ${new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+                [`Total Unit: ${units.length} Unit Kerja`],
+                ['']
+            ])
+
+            xlsx.utils.sheet_add_json(worksheet, worksheetData, { origin: 'A10' })
+
+            worksheet['!cols'] = [
+                { wch: 6 },
+                { wch: 40 },
+                { wch: 55 },
+                { wch: 22 }
+            ]
+
+            const workbook = xlsx.utils.book_new()
+            xlsx.utils.book_append_sheet(workbook, worksheet, "Master_Unit_Kerja")
+            xlsx.writeFile(workbook, `Laporan_Master_Unit_Kerja_${new Date().toISOString().slice(0, 10)}.xlsx`)
+            setIsGenerating(false)
+            showToast('success', 'Laporan Excel Master Unit berhasil diunduh.')
+        }, 300)
     }
 
     // --- BACA FILE UPLOAD (POIN 6) ---
@@ -258,6 +366,56 @@ export default function AdminUnitPage() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Tombol Unduh Laporan (PDF & Excel) */}
+                    <div className="relative" ref={exportDropdownRef}>
+                        <button
+                            onClick={() => setIsExportOpen(!isExportOpen)}
+                            disabled={isGenerating || units.length === 0}
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-50 hover:bg-blue-100 text-blue-800 border border-blue-200 rounded-xl text-xs font-black transition-all shadow-2xs hover:shadow-xs disabled:opacity-50"
+                            title="Unduh rekapitulasi data unit kerja resmi dalam format PDF atau Excel"
+                        >
+                            <Printer className="w-4 h-4 text-blue-600" />
+                            <span>{isGenerating ? 'Memproses...' : 'Unduh Laporan'}</span>
+                            <ChevronDown className={cn("w-3.5 h-3.5 text-blue-600 transition-transform duration-200", isExportOpen ? "rotate-180" : "")} />
+                        </button>
+
+                        <AnimatePresence>
+                            {isExportOpen && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: 8, scale: 0.95 }}
+                                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                                    exit={{ opacity: 0, y: 8, scale: 0.95 }}
+                                    className="absolute right-0 mt-2 w-56 bg-white rounded-2xl shadow-xl border border-slate-200 p-1.5 z-50 overflow-hidden"
+                                >
+                                    <button
+                                        onClick={handleExportPDF}
+                                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left rounded-xl hover:bg-slate-50 transition-colors text-xs font-extrabold text-slate-700 hover:text-red-600 group"
+                                    >
+                                        <div className="w-7 h-7 rounded-lg bg-red-50 text-red-600 flex items-center justify-center font-black group-hover:scale-110 transition-transform">
+                                            <FileText className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <div className="font-bold">Format Dokumen PDF</div>
+                                            <div className="text-[10px] text-slate-400 font-medium">Cover Resmi & Tabulasi Kop</div>
+                                        </div>
+                                    </button>
+                                    <button
+                                        onClick={handleExportExcel}
+                                        className="w-full flex items-center gap-2.5 px-3.5 py-2.5 text-left rounded-xl hover:bg-slate-50 transition-colors text-xs font-extrabold text-slate-700 hover:text-emerald-700 group mt-1"
+                                    >
+                                        <div className="w-7 h-7 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center font-black group-hover:scale-110 transition-transform">
+                                            <FileSpreadsheet className="w-4 h-4" />
+                                        </div>
+                                        <div>
+                                            <div className="font-bold">Format Spreadsheet Excel</div>
+                                            <div className="text-[10px] text-slate-400 font-medium">File .xlsx Siap Olah Data</div>
+                                        </div>
+                                    </button>
+                                </motion.div>
+                            )}
+                        </AnimatePresence>
+                    </div>
+
                     {/* Tombol Unduh Template Excel (Poin 6) */}
                     <button
                         onClick={handleDownloadTemplate}

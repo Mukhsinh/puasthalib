@@ -140,7 +140,7 @@ export default function AdminAnalisaPage() {
                 [appSettings.kop_rs.toUpperCase()],
                 [`${appSettings.kop_alamat} | ${appSettings.kop_kontak}`],
                 [],
-                ['LAPORAN ANALISIS DATA & PERFORMA LAYANAN EKSKUTIF (KOMPREHENSIF)'],
+                ['LAPORAN ANALISIS DATA & PERFORMA LAYANAN EKSEKUTIF (KOMPREHENSIF)'],
                 [`Periode: ${periodeText} | Unit: ${unitText}`],
                 [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID')}`],
                 [`Penanggung Jawab: ${signerName} (${signerRole})`],
@@ -161,7 +161,7 @@ export default function AdminAnalisaPage() {
             xlsx.utils.sheet_add_json(worksheet, worksheetData2, { origin: `A${20 + worksheetData1.length}` })
 
             const workbook = xlsx.utils.book_new()
-            xlsx.utils.book_append_sheet(workbook, worksheet, "Laporan_Analisa_Ekskutif")
+            xlsx.utils.book_append_sheet(workbook, worksheet, "Laporan_Analisa_Eksekutif")
             xlsx.writeFile(workbook, `Laporan_Analisa_Komprehensif_${new Date().toISOString().slice(0, 10)}.xlsx`)
             setIsGenerating(false)
         }, 1000)

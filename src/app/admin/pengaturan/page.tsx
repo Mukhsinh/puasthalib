@@ -111,15 +111,22 @@ export default function AdminSettingsPage() {
         const file = e.target.files?.[0]
         if (!file) return
         if (file.size > 5 * 1024 * 1024) {
-            alert('Ukuran file maksimal 5MB')
+            alert('Ukuran file logo maksimal 5MB')
             return
         }
         const reader = new FileReader()
+        reader.onerror = () => {
+            alert('Gagal membaca file gambar.')
+        }
         reader.onload = (event) => {
             const img = new Image()
+            img.crossOrigin = 'anonymous'
+            img.onerror = () => {
+                alert('Format gambar tidak didukung atau berkas rusak.')
+            }
             img.onload = () => {
                 const canvas = document.createElement('canvas')
-                const maxDim = 250
+                const maxDim = 300
                 let width = img.width
                 let height = img.height
                 if (width > height) {
@@ -153,34 +160,36 @@ export default function AdminSettingsPage() {
         setSaveStatus('idle')
         const supabase = createClient()
 
-        try {
-            // Upsert each setting key-value pair cleanly
-            for (const [key, value] of Object.entries(settings)) {
-                if (value !== undefined && value !== null) {
-                    const { data: existing } = await supabase
-                        .from('app_settings')
-                        .select('id')
-                        .eq('setting_key', key)
-                        .maybeSingle()
+        // Keep active session alive during and after save
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('puas_last_activity', Date.now().toString())
+        }
 
-                    if (existing) {
-                        await supabase
-                            .from('app_settings')
-                            .update({ setting_value: String(value), updated_at: new Date().toISOString() })
-                            .eq('id', existing.id)
-                    } else {
-                        await supabase
-                            .from('app_settings')
-                            .insert({ setting_key: key, setting_value: String(value) })
-                    }
-                }
+        try {
+            // Atomic batch upsert with conflict on setting_key
+            const upsertPayload = Object.entries(settings).map(([setting_key, setting_value]) => ({
+                setting_key,
+                setting_value: String(setting_value ?? ''),
+                updated_at: new Date().toISOString()
+            }))
+
+            const { error } = await supabase
+                .from('app_settings')
+                .upsert(upsertPayload, { onConflict: 'setting_key' })
+
+            if (error) {
+                console.error("Supabase upsert error:", error)
+                throw error
             }
+
             setSaveStatus('success')
             if (typeof window !== 'undefined') {
-                window.dispatchEvent(new CustomEvent('app_settings_updated'))
+                localStorage.setItem('puas_last_activity', Date.now().toString())
+                window.dispatchEvent(new CustomEvent('app_settings_updated', { detail: settings }))
             }
-        } catch (error) {
+        } catch (error: any) {
             console.error("Error saving settings:", error)
+            alert('Gagal menyimpan pengaturan: ' + (error?.message || 'Terjadi kesalahan sistem.'))
             setSaveStatus('error')
         } finally {
             setIsSaving(false)
@@ -397,9 +406,9 @@ export default function AdminSettingsPage() {
                                         <Building className="w-4 h-4 text-primary" /> Logo Instansi / Aplikasi
                                     </h3>
                                     <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-                                        <div className="w-24 h-24 bg-gradient-to-br from-slate-100 to-slate-50 border-2 border-dashed border-slate-300 rounded-2xl flex items-center justify-center font-bold text-slate-400 text-3xl overflow-hidden shadow-inner relative group">
+                                        <div className="w-24 h-24 bg-white border-2 border-dashed border-slate-300 rounded-2xl flex items-center justify-center font-bold text-slate-400 text-3xl overflow-hidden shadow-inner relative group p-1">
                                             {settings.app_logo ? (
-                                                <img src={settings.app_logo} alt="Logo Instansi" className="w-full h-full object-cover" />
+                                                <img src={settings.app_logo} alt="Logo Instansi" className="w-full h-full object-contain" />
                                             ) : settings.nama_sub_instansi ? (
                                                 settings.nama_sub_instansi.charAt(0).toUpperCase()
                                             ) : (

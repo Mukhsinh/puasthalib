@@ -42,7 +42,7 @@ const SIDEBAR_MENUS = [
         items: [
             { name: 'Analisa Data', href: '/admin/analisa', icon: BarChart3, badge: null },
             { name: 'Analisis Kepuasan', href: '/admin/analisis-kepuasan', icon: PieChart, badge: 'IKM' },
-            { name: 'Laporan Ekskutif', href: '/admin/laporan', icon: FileText, badge: null },
+            { name: 'Laporan Eksekutif', href: '/admin/laporan', icon: FileText, badge: null },
         ]
     },
     {
@@ -112,11 +112,26 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         fetchUserData()
 
-        // 4. Session Keep-Alive and Inactivity Tracker (30 Menit)
-        const isStaySignedIn = typeof window !== 'undefined' && localStorage.getItem('puas_stay_signed_in') === 'true'
+        // Listen for live app settings updates (e.g. logo or name change)
+        const handleSettingsUpdated = async () => {
+            const { data: settingsArr } = await supabase
+                .from('app_settings')
+                .select('setting_key, setting_value')
+                .in('setting_key', ['app_name', 'app_logo'])
+            if (settingsArr) {
+                settingsArr.forEach((s: any) => {
+                    if (s.setting_key === 'app_name' && s.setting_value) setAppName(s.setting_value)
+                    if (s.setting_key === 'app_logo') setAppLogo(s.setting_value || '')
+                })
+            }
+        }
+        window.addEventListener('app_settings_updated', handleSettingsUpdated)
 
-        // Record initial activity
-        if (typeof window !== 'undefined' && !localStorage.getItem('puas_last_activity')) {
+        // 4. Session Keep-Alive and Inactivity Tracker (30 Menit)
+        const isStaySignedIn = typeof window !== 'undefined' && (localStorage.getItem('puas_stay_signed_in') === 'true' || localStorage.getItem('puas_stay_signed_in') === null)
+
+        // Always record initial active timestamp on layout mount
+        if (typeof window !== 'undefined') {
             localStorage.setItem('puas_last_activity', Date.now().toString())
         }
 
@@ -177,6 +192,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         })
 
         return () => {
+            window.removeEventListener('app_settings_updated', handleSettingsUpdated)
             activityEvents.forEach(evt => window.removeEventListener(evt, throttledActivity))
             clearInterval(idleInterval)
             subscription.unsubscribe()
@@ -253,9 +269,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none" />
                     <div className="flex items-center gap-3 relative">
                         {appLogo ? (
-                            <img src={appLogo} alt="Logo" className="w-10 h-10 rounded-2xl object-cover shadow-lg border border-emerald-800/40" />
+                            <div className="w-10 h-10 rounded-2xl bg-white/10 p-1 shadow-lg border border-emerald-800/40 flex items-center justify-center shrink-0">
+                                <img src={appLogo} alt="Logo" className="w-full h-full object-contain rounded-xl" />
+                            </div>
                         ) : (
-                            <div className="w-10 h-10 rounded-2xl bg-white/10 p-0.5 shadow-lg border border-emerald-800/40 flex items-center justify-center">
+                            <div className="w-10 h-10 rounded-2xl bg-white/10 p-0.5 shadow-lg border border-emerald-800/40 flex items-center justify-center shrink-0">
                                 <div className="w-full h-full bg-emerald-800 rounded-[12px] flex items-center justify-center text-emerald-100 font-black text-xl">
                                     {appName.charAt(0)}
                                 </div>
@@ -380,9 +398,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                         >
                             <Menu className="w-6 h-6" />
                         </button>
-                        <div className="hidden sm:flex items-center gap-2 text-xs font-bold text-slate-400">
-                            <Link href="/admin" className="hover:text-blue-600 transition-colors">Portal Admin</Link>
-                            <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
+                        <div className="flex items-center gap-2.5 text-xs font-bold text-slate-400">
+                            {appLogo && (
+                                <img src={appLogo} alt="Logo" className="w-8 h-8 object-contain rounded-xl p-0.5 bg-slate-50 border border-slate-200 shadow-xs" />
+                            )}
+                            <Link href="/admin" className="hover:text-emerald-700 text-slate-500 font-extrabold transition-colors hidden sm:inline">Portal Admin</Link>
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-300 hidden sm:inline" />
                             <span className="text-slate-800 capitalize font-black">
                                 {pathname.split('/').pop() || 'Dasbor'}
                             </span>
