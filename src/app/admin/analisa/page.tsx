@@ -2,14 +2,27 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react'
 import { createClient } from '@/utils/supabase/client'
-import { BarChart3, TrendingUp, Activity, Download, Layers, Calendar, ListFilter, FileText } from 'lucide-react'
+import { BarChart3, TrendingUp, Activity, Download, Layers, Calendar, ListFilter, FileText, X } from 'lucide-react'
 import {
     BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer,
     PieChart, Pie, Cell, AreaChart, Area
 } from 'recharts'
 import { motion } from 'framer-motion'
-import { generateFormalPDF } from '@/utils/pdfExport'
+import { generateFormalPDF, formatPrintDate } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
+
+const formatMonthPeriode = (ym: string) => {
+    if (!ym) return 'Seluruh Periode'
+    const parts = ym.split('-')
+    if (parts.length < 2) return ym
+    const [y, m] = parts
+    const MONTHS = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember']
+    const mIdx = parseInt(m, 10) - 1
+    if (mIdx >= 0 && mIdx < 12) {
+        return `${MONTHS[mIdx]} ${y}`
+    }
+    return ym
+}
 
 const COLORS = ['#10b981', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#f97316']
 
@@ -44,33 +57,22 @@ export default function AdminAnalisaPage() {
 
     useEffect(() => {
         const fetchInitialData = async () => {
-            const [sessionRes, settingsRes] = await Promise.all([
+            const [sessionRes, settingsRes, unitsRes] = await Promise.all([
                 supabase.auth.getSession(),
-                fetchAppSettings(supabase)
+                fetchAppSettings(supabase),
+                supabase.from('units').select('id, nama').order('nama', { ascending: true })
             ])
 
-            let profileUnitId: string | null = null
-            let role = 'user'
             const session = sessionRes.data?.session
             if (session) {
                 const { data: profile } = await supabase.from('profiles').select('role, unit_id').eq('id', session.user.id).single()
                 if (profile) {
-                    role = profile.role
-                    setUserRole(role)
-                    if (role === 'user') {
-                        profileUnitId = profile.unit_id
-                        setUserUnitId(profile.unit_id)
-                        setFilterUnit(profile.unit_id || '')
-                    }
+                    setUserRole(profile.role)
+                    setUserUnitId(profile.unit_id)
                 }
             }
 
-            let unitQuery = supabase.from('units').select('id, nama').order('nama', { ascending: true })
-            if (role === 'user' && profileUnitId) {
-                unitQuery = unitQuery.eq('id', profileUnitId)
-            }
-            const { data: unitsData } = await unitQuery
-            setUnits(unitsData || [])
+            setUnits(unitsRes.data || [])
 
             if (settingsRes) {
                 setAppSettings({
@@ -84,28 +86,30 @@ export default function AdminAnalisaPage() {
                 setSignerRole(settingsRes.jabatan_penandatangan)
             }
             initialFetchDone.current = true
-            fetchTicketsData(role, profileUnitId)
+            fetchTicketsData()
         }
         fetchInitialData()
     }, [])
 
-    const fetchTicketsData = async (role?: string, unitId?: string | null) => {
+    const fetchTicketsData = async (activeUnitArg?: string, activePeriodeArg?: string) => {
         setIsLoading(true)
-        let query = supabase.from('tickets').select('jenis, status, created_at, unit_id, units!unit_id(nama)')
+        let query = supabase.from('tickets').select('jenis, status, created_at, unit_id, units!unit_id(nama)').order('created_at', { ascending: false })
 
-        // Use passed parameters if available (initial fetch), otherwise use state (subsequent fetches)
-        const effectiveRole = role ?? userRole
-        const effectiveUnitId = unitId !== undefined ? unitId : userUnitId
+        const unitToFilter = activeUnitArg !== undefined ? activeUnitArg : filterUnit
+        const periodeToFilter = activePeriodeArg !== undefined ? activePeriodeArg : filterPeriode
 
-        if (effectiveRole === 'user' && effectiveUnitId) {
-            query = query.eq('unit_id', effectiveUnitId)
-        } else if (filterUnit) {
-            query = query.eq('unit_id', filterUnit)
+        if (unitToFilter) {
+            query = query.eq('unit_id', unitToFilter)
         }
-        if (filterPeriode) {
-            const [year, month] = filterPeriode.split('-')
-            query = query.gte('created_at', `${year}-${month}-01`)
-            query = query.lt('created_at', new Date(Number(year), Number(month), 1).toISOString())
+        if (periodeToFilter) {
+            const [yearStr, monthStr] = periodeToFilter.split('-')
+            const y = parseInt(yearStr, 10)
+            const m = parseInt(monthStr, 10)
+            const nextY = m === 12 ? y + 1 : y
+            const nextM = m === 12 ? 1 : m + 1
+            const startStr = `${y}-${String(m).padStart(2, '0')}-01T00:00:00`
+            const endStr = `${nextY}-${String(nextM).padStart(2, '0')}-01T00:00:00`
+            query = query.gte('created_at', startStr).lt('created_at', endStr)
         }
 
         const { data } = await query
@@ -159,8 +163,8 @@ export default function AdminAnalisaPage() {
         setIsGenerating(true)
         try {
             const xlsx = await import('xlsx')
-            const periodeText = filterPeriode ? new Date(filterPeriode + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : 'Keseluruhan waktu'
-            const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Global'
+            const periodeText = filterPeriode ? formatMonthPeriode(filterPeriode) : 'Seluruh Periode'
+            const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Kerja'
 
             const worksheetData1 = pieData.map((t, index) => ({
                 No: index + 1,
@@ -184,7 +188,7 @@ export default function AdminAnalisaPage() {
                 [],
                 ['LAPORAN ANALISIS DATA & PERFORMA LAYANAN EKSEKUTIF (KOMPREHENSIF)'],
                 [`Periode: ${periodeText} | Unit: ${unitText}`],
-                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID')}`],
+                [`Tanggal Cetak: ${formatPrintDate(printDate)}`],
                 [`Penanggung Jawab: ${signerName} (${signerRole})`],
                 [],
                 [`Total Interaksi: ${countTotal} Tiket Laporan Masuk`],
@@ -215,8 +219,8 @@ export default function AdminAnalisaPage() {
     const handleExportPDF = async () => {
         setIsGenerating(true)
         try {
-            const periodeText = filterPeriode ? new Date(filterPeriode + '-01').toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }) : 'Keseluruhan waktu'
-            const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Global'
+            const periodeText = filterPeriode ? formatMonthPeriode(filterPeriode) : 'Seluruh Periode'
+            const unitText = filterUnit ? units.find(u => u.id === filterUnit)?.nama || filterUnit : 'Seluruh Unit Kerja'
 
             const tableHeaders = ['No', 'Kategori Laporan (Jenis Tiket)', 'Jumlah Tiket', 'Persentase Beban'];
             const tableData = pieData.map((t, index) => [
@@ -324,22 +328,37 @@ export default function AdminAnalisaPage() {
                     <p className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center gap-2">
                         <ListFilter className="w-4 h-4" /> Filter Analisa:
                     </p>
-                    <div className="flex gap-3 w-full">
+                    <div className="flex flex-col sm:flex-row gap-3 w-full">
                         <select
                             value={filterUnit}
                             onChange={(e) => setFilterUnit(e.target.value)}
-                            disabled={userRole === 'user'}
-                            className="px-3 py-2 border rounded-lg text-sm bg-white text-slate-900 font-semibold outline-none focus:ring-2 focus:ring-primary/50 flex-1 disabled:opacity-70 disabled:cursor-not-allowed"
+                            className="px-3.5 py-2 border border-slate-200 rounded-xl text-xs bg-white text-slate-800 font-bold outline-none focus:ring-2 focus:ring-emerald-500/20 flex-1 cursor-pointer shadow-xs"
                         >
-                            {userRole !== 'user' && <option value="">Semua Unit Kerja</option>}
+                            <option value="">Semua Unit Kerja</option>
                             {units.map(u => <option key={u.id} value={u.id}>{u.nama}</option>)}
                         </select>
-                        <input
-                            type="month"
-                            value={filterPeriode}
-                            onChange={(e) => setFilterPeriode(e.target.value)}
-                            className="px-3 py-2 border rounded-lg text-sm bg-white text-slate-900 font-semibold outline-none focus:ring-2 focus:ring-primary/50 flex-1"
-                        />
+                        <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-xl text-xs font-bold flex-1 shadow-xs">
+                            <Calendar className="w-4 h-4 text-emerald-600 shrink-0" />
+                            <span className="text-[11px] font-bold text-slate-500 shrink-0">Periode:</span>
+                            <input
+                                type="month"
+                                value={filterPeriode}
+                                onChange={(e) => setFilterPeriode(e.target.value)}
+                                className="bg-transparent text-xs font-bold text-slate-800 outline-none cursor-pointer flex-1"
+                                title="Pilih Periode Bulan (Kosongkan untuk Seluruh Periode)"
+                            />
+                            {filterPeriode ? (
+                                <button
+                                    onClick={() => setFilterPeriode('')}
+                                    title="Reset ke Seluruh Periode"
+                                    className="text-slate-400 hover:text-rose-500 p-0.5 rounded-full hover:bg-slate-100 transition-all"
+                                >
+                                    <X className="w-3.5 h-3.5" />
+                                </button>
+                            ) : (
+                                <span className="text-[10px] text-slate-400 font-semibold italic">Semua Periode</span>
+                            )}
+                        </div>
                     </div>
                 </div>
                 {/* Print Kosmetik Config */}

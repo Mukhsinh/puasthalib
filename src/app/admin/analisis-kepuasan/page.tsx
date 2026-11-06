@@ -5,10 +5,10 @@ import { motion } from 'framer-motion'
 import {
     FileText, Download, TrendingUp, Users, Star, Award, Heart,
     MessageSquare, Briefcase, Activity, CheckCircle2, Layers,
-    PieChart as PieIcon, ShieldCheck, Gauge
+    PieChart as PieIcon, ShieldCheck, Gauge, Calendar, Building2, X
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
-import { generateFormalPDF } from '@/utils/pdfExport'
+import { generateFormalPDF, formatPrintDate } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
 import SpeedometerGauge from '@/components/SpeedometerGauge'
 import {
@@ -39,6 +39,9 @@ export default function AnalisisKepuasanPage() {
     const [rankingFilter, setRankingFilter] = useState<'all' | 'top10' | 'bottom10'>('all')
     const [rawSurveys, setRawSurveys] = useState<any[]>([])
     const [allTickets, setAllTickets] = useState<any[]>([])
+    const [units, setUnits] = useState<any[]>([])
+    const [filterUnit, setFilterUnit] = useState<string>('Semua')
+    const [dateRange, setDateRange] = useState({ start: '', end: '' })
 
     // Print & KOP Configuration
     const [printDate, setPrintDate] = useState(new Date().toISOString().slice(0, 10))
@@ -59,10 +62,16 @@ export default function AnalisisKepuasanPage() {
         const fetchInitialData = async () => {
             setIsLoading(true)
 
-            // 1 & 2. Fetch App Settings & Session in parallel
-            const [settings, sessionRes] = await Promise.all([
+            // 1. Fetch App Settings, Session, Units, Tickets, and Surveys concurrently
+            const [settings, sessionRes, unitsRes, ticketsRes, surveyRes] = await Promise.all([
                 fetchAppSettings(supabase),
-                supabase.auth.getSession()
+                supabase.auth.getSession(),
+                supabase.from('units').select('id, nama').order('nama', { ascending: true }),
+                supabase.from('tickets').select('id, jenis, status, unit_id, created_at').order('created_at', { ascending: false }),
+                supabase.from('tickets')
+                    .select('*, units!unit_id(nama)')
+                    .eq('jenis', 'survei')
+                    .order('created_at', { ascending: false })
             ])
 
             if (settings) {
@@ -78,37 +87,7 @@ export default function AnalisisKepuasanPage() {
                 setSignerRole(settings.jabatan_penandatangan)
             }
 
-            // Profile Check
-            let profileUnitId: string | null = null
-            let role = 'user'
-            const session = sessionRes.data?.session
-            if (session) {
-                const { data: profile } = await supabase.from('profiles').select('role, unit_id').eq('id', session.user.id).single()
-                if (profile) {
-                    role = profile.role
-                    if (role === 'user') {
-                        profileUnitId = profile.unit_id
-                    }
-                }
-            }
-
-            // 3 & 4. Fetch All Tickets and Surveys concurrently
-            let allTicketsQuery = supabase.from('tickets').select('id, jenis, status, unit_id, created_at')
-            let surveyQuery = supabase.from('tickets')
-                .select('*, units!unit_id(nama)')
-                .eq('jenis', 'survei')
-                .order('created_at', { ascending: false })
-
-            if (role === 'user' && profileUnitId) {
-                allTicketsQuery = allTicketsQuery.eq('unit_id', profileUnitId)
-                surveyQuery = surveyQuery.eq('unit_id', profileUnitId)
-            }
-
-            const [ticketsRes, surveyRes] = await Promise.all([
-                allTicketsQuery,
-                surveyQuery
-            ])
-
+            setUnits(unitsRes.data || [])
             setAllTickets(ticketsRes.data || [])
             setRawSurveys(surveyRes.data || [])
 
@@ -135,15 +114,39 @@ export default function AnalisisKepuasanPage() {
         umurChartData,
         unitRankingData
     } = useMemo(() => {
+        // 1. Filter Tickets and Surveys by Unit and Date Range
+        const filterItem = (item: any) => {
+            const matchesUnit = filterUnit === 'Semua' ? true : item.unit_id === filterUnit
+            let matchesDate = true
+            if (dateRange.start && dateRange.end) {
+                const itemTime = new Date(item.created_at).getTime()
+                const startTime = new Date(dateRange.start + 'T00:00:00').getTime()
+                const endTime = new Date(dateRange.end + 'T23:59:59.999').getTime()
+                matchesDate = itemTime >= startTime && itemTime <= endTime
+            } else if (dateRange.start) {
+                const itemTime = new Date(item.created_at).getTime()
+                const startTime = new Date(dateRange.start + 'T00:00:00').getTime()
+                matchesDate = itemTime >= startTime
+            } else if (dateRange.end) {
+                const itemTime = new Date(item.created_at).getTime()
+                const endTime = new Date(dateRange.end + 'T23:59:59.999').getTime()
+                matchesDate = itemTime <= endTime
+            }
+            return matchesUnit && matchesDate
+        }
+
+        const filteredTickets = allTickets.filter(filterItem).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        const filteredSurveys = rawSurveys.filter(filterItem).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+
         // Operational metrics
-        const interaksi = allTickets.length > 0 ? allTickets.length : rawSurveys.length
-        const selesai = allTickets.filter(t => t.status === 'Selesai').length
+        const interaksi = filteredTickets.length > 0 ? filteredTickets.length : filteredSurveys.length
+        const selesai = filteredTickets.filter(t => t.status === 'Selesai').length
         const resolusi = interaksi > 0
             ? Math.round((selesai / interaksi) * 100)
-            : (rawSurveys.length > 0 ? 100 : 0)
+            : (filteredSurveys.length > 0 ? 100 : 0)
 
         // Permenpan RB calculations
-        const respondents = rawSurveys.length
+        const respondents = filteredSurveys.length
         let totalScoreSum = 0
         let totalQuestionsAnswered = 0
         const questionScores = SURVEY_QUESTIONS.map(q => ({ id: q.id, name: q.title, total: 0, count: 0 }))
@@ -152,7 +155,7 @@ export default function AnalisisKepuasanPage() {
         const umurCount: Record<string, number> = {}
         const unitScores: Record<string, { total: number, count: number }> = {}
 
-        const tData = rawSurveys.map((s, index) => {
+        const tData = filteredSurveys.map((s, index) => {
             const payload = s.data_payload || {}
             let avgRating = 0
 
@@ -280,7 +283,7 @@ export default function AnalisisKepuasanPage() {
             umurChartData: uChartData,
             unitRankingData: uRankingData
         }
-    }, [allTickets, rawSurveys, rankingFilter])
+    }, [allTickets, rawSurveys, filterUnit, dateRange, rankingFilter])
 
     // --- HANDLER EXCEL FORMAL DENGAN KOP & DETAIL LENGKAP ---
     const handleExportExcel = async () => {
@@ -288,6 +291,14 @@ export default function AnalisisKepuasanPage() {
         try {
             const xlsx = await import('xlsx')
             const worksheet = xlsx.utils.json_to_sheet([])
+            const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
+            const periodeText = (dateRange.start && dateRange.end)
+                ? `${formatPrintDate(dateRange.start)} s/d ${formatPrintDate(dateRange.end)}`
+                : dateRange.start
+                    ? `Mulai ${formatPrintDate(dateRange.start)}`
+                    : dateRange.end
+                        ? `Hingga ${formatPrintDate(dateRange.end)}`
+                        : 'Seluruh Riwayat'
 
             // 1. KOP SURAT FORMAL & METADATA RESMI
             xlsx.utils.sheet_add_aoa(worksheet, [
@@ -297,7 +308,8 @@ export default function AnalisisKepuasanPage() {
                 [],
                 ['LAPORAN HASIL EVALUASI SURVEI KEPUASAN MASYARAKAT (IKM)'],
                 ['BERDASARKAN PERMENPAN RB NO. 14 TAHUN 2017'],
-                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+                [`Cakupan: ${unitText} | Periode: ${periodeText}`],
+                [`Tanggal Cetak: ${formatPrintDate(printDate)}`],
                 [`Penanggung Jawab / Pejabat: ${signerName} (${signerRole})`],
                 [],
                 ['RINGKASAN INDIKATOR KUNCI (KEY PERFORMANCE INDICATORS):'],
@@ -389,6 +401,15 @@ export default function AnalisisKepuasanPage() {
     const handleExportPDF = async () => {
         setIsGenerating(true)
         try {
+            const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
+            const periodeText = (dateRange.start && dateRange.end)
+                ? `${formatPrintDate(dateRange.start)} s/d ${formatPrintDate(dateRange.end)}`
+                : dateRange.start
+                    ? `Mulai ${formatPrintDate(dateRange.start)}`
+                    : dateRange.end
+                        ? `Hingga ${formatPrintDate(dateRange.end)}`
+                        : 'Seluruh Riwayat'
+
             // Unsur Penilaian Table
             const unsurHeaders = ['No', 'Unsur Pelayanan (Permenpan RB)', 'Indeks (1-4)', 'Konversi (100)', 'Mutu', 'Kategori']
             const unsurRows = barChartData.map((u, i) => [
@@ -424,7 +445,7 @@ export default function AnalisisKepuasanPage() {
 
             await generateFormalPDF({
                 title: 'LAPORAN HASIL EVALUASI SURVEI KEPUASAN MASYARAKAT (IKM)',
-                subtitle: `Pedoman Permenpan RB No. 14 Tahun 2017 • Evaluasi Real-Time Terintegrasi`,
+                subtitle: `Pedoman Permenpan RB No. 14 Tahun 2017 • Unit: ${unitText} • Periode: ${periodeText} • Evaluasi Real-Time`,
                 documentNumber: `PUAS/IKM/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
                 filename: `Laporan_IKM_Formal_${new Date().toISOString().slice(0, 10)}.pdf`,
                 appSettings,
@@ -453,7 +474,7 @@ export default function AnalisisKepuasanPage() {
                 narrativeIntro: [
                     'I. RINGKASAN EKSEKUTIF PELAYANAN & KEPUASAN PUBLIK',
                     `Laporan evaluasi ini disusun berdasarkan akumulasi data survei kepuasan masyarakat terhadap unit-unit pelayanan publik di ${appSettings.kop_rs}.`,
-                    `Berdasarkan data yang terhimpun dari ${totalRespondents} responden, diperoleh Nilai Konversi IKM sebesar ${ikmKonversi} dari skala 100 (Indeks ${globalAvg} dari skala 4.00). Kinerja pelayanan publik ini dikategorikan dengan Predikat Mutu "${predikatMutu.toUpperCase()}" (Mutu ${predikatGrade}).`,
+                    `Berdasarkan data yang terhimpun dari ${totalRespondents} responden (Lingkup: ${unitText}, Periode: ${periodeText}), diperoleh Nilai Konversi IKM sebesar ${ikmKonversi} dari skala 100 (Indeks ${globalAvg} dari skala 4.00). Kinerja pelayanan publik ini dikategorikan dengan Predikat Mutu "${predikatMutu.toUpperCase()}" (Mutu ${predikatGrade}).`,
                     '',
                     'II. ANALISIS 11 UNSUR PELAYANAN (PERMENPAN RB NO. 14 TAHUN 2017):'
                 ],
@@ -551,6 +572,71 @@ export default function AnalisisKepuasanPage() {
                         placeholder="Jabatan Penandatangan"
                         className="px-3 py-1.5 border border-slate-200 rounded-xl bg-white text-slate-900 font-bold outline-none focus:ring-2 focus:ring-blue-500/30 text-xs flex-1 min-w-[180px] hidden sm:block"
                     />
+                </div>
+            </div>
+
+            {/* Filter Toolbar: Unit Kerja & Range Tanggal */}
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-sm print:hidden flex flex-col md:flex-row gap-3 items-stretch md:items-center justify-between">
+                <div className="flex flex-wrap items-center gap-3 flex-1">
+                    {/* Unit Kerja Select */}
+                    <div className="flex items-center gap-2 min-w-[200px]">
+                        <Building2 className="w-4 h-4 text-slate-500 shrink-0" />
+                        <select
+                            value={filterUnit}
+                            onChange={(e) => setFilterUnit(e.target.value)}
+                            className="w-full px-3 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/30"
+                        >
+                            <option value="Semua">Semua Unit Kerja</option>
+                            {units.map((u) => (
+                                <option key={u.id} value={u.id}>
+                                    {u.nama}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* Range Tanggal */}
+                    <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-slate-500 shrink-0" />
+                        <div className="flex items-center gap-1.5">
+                            <input
+                                type="date"
+                                value={dateRange.start}
+                                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                                className="px-2.5 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/30"
+                                title="Dari Tanggal"
+                            />
+                            <span className="text-xs text-slate-400 font-bold">s/d</span>
+                            <input
+                                type="date"
+                                value={dateRange.end}
+                                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                                className="px-2.5 py-1.5 text-xs font-bold text-slate-800 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/30"
+                                title="Sampai Tanggal"
+                            />
+                        </div>
+                    </div>
+
+                    {/* Reset Button */}
+                    {(filterUnit !== 'Semua' || dateRange.start || dateRange.end) && (
+                        <button
+                            onClick={() => {
+                                setFilterUnit('Semua')
+                                setDateRange({ start: '', end: '' })
+                            }}
+                            className="px-2.5 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-all flex items-center gap-1"
+                            title="Reset filter ke seluruh data"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Reset Filter</span>
+                        </button>
+                    )}
+                </div>
+
+                {/* Filter info indicator */}
+                <div className="text-[11px] font-bold text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200/60 shrink-0 flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                    <span>Tersaring: <b>{totalInteraksi}</b> Tiket | <b>{totalRespondents}</b> Survei</span>
                 </div>
             </div>
 

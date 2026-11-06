@@ -42,6 +42,25 @@ export interface PDFExportOptions {
     tableDataBottom?: any[][];
 }
 
+export const formatPrintDate = (dateInput: string): string => {
+    if (!dateInput) return '';
+    const cleanDate = dateInput.split('T')[0];
+    const parts = cleanDate.split('-');
+    if (parts.length === 3) {
+        const year = parts[0];
+        const monthIdx = parseInt(parts[1], 10) - 1;
+        const day = parseInt(parts[2], 10);
+        const MONTHS = [
+            'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+            'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'
+        ];
+        if (monthIdx >= 0 && monthIdx < 12 && !isNaN(day)) {
+            return `${day} ${MONTHS[monthIdx]} ${year}`;
+        }
+    }
+    return new Date(dateInput).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+};
+
 export const generateFormalPDF = async (options: PDFExportOptions) => {
     const { default: jsPDF } = await import('jspdf');
     const { default: autoTable } = await import('jspdf-autotable');
@@ -142,7 +161,7 @@ export const generateFormalPDF = async (options: PDFExportOptions) => {
 
         const metaRows = [
             { label: 'Nomor Dokumen', value: `:  ${docNum}` },
-            { label: 'Tanggal Cetak', value: `:  ${new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}` },
+            { label: 'Tanggal Cetak', value: `:  ${formatPrintDate(options.printDate)}` },
             { label: 'Pejabat Pengesah', value: `:  ${options.signerName}` },
             { label: 'Jabatan', value: `:  ${options.signerRole}` }
         ];
@@ -496,7 +515,7 @@ export const generateFormalPDF = async (options: PDFExportOptions) => {
         yPos += 4;
     }
 
-    const todayDate = new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    const todayDate = formatPrintDate(options.printDate);
     const location = options.appSettings.kop_nama.replace('Pemerintah ', '').replace('Provinsi ', '').replace('Kabupaten ', '');
     const signatureText = `${location}, ${todayDate}`;
 
@@ -632,7 +651,7 @@ export const generateSystemOverviewPDF = async (options: SystemOverviewOptions) 
     doc.setTextColor(30, 41, 59);
     doc.text(`Nama Platform : Sistem PUAS (Pusat Aduan & Survei)`, boxX + 8, cy + 18);
     doc.text(`Standar Regulasi: Permenpan RB No. 14 Tahun 2017 & UU No. 25/2009`, boxX + 8, cy + 25);
-    doc.text(`Tanggal Cetak  : ${new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`, boxX + 8, cy + 32);
+    doc.text(`Tanggal Cetak  : ${formatPrintDate(options.printDate)}`, boxX + 8, cy + 32);
     doc.text(`Penanggung Jawab: ${options.appSettings.nama_penandatangan || 'Direktur'}`, boxX + 8, cy + 39);
 
     doc.setFontSize(9);
@@ -896,7 +915,7 @@ export const generateSystemOverviewPDF = async (options: SystemOverviewOptions) 
     y += 28;
 
     // Signature Block
-    const signDate = new Date(options.printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+    const signDate = formatPrintDate(options.printDate);
     const signLoc = (options.appSettings.kop_nama || '').replace('Pemerintah ', '').replace('Provinsi ', '').replace('Kabupaten ', '');
     const signX = pageWidth - margin - 65;
 

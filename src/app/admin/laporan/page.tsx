@@ -4,7 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react'
 import {
     FileText, Download, Calendar, Filter, Activity, Users, Zap,
     Briefcase, Award, BarChart3, ChevronRight, CheckCircle2,
-    Layers, Search, ArrowUpRight
+    Layers, Search, ArrowUpRight, X
 } from 'lucide-react'
 import { createClient } from '@/utils/supabase/client'
 import {
@@ -12,7 +12,7 @@ import {
     ResponsiveContainer, Cell, PieChart, Pie
 } from 'recharts'
 import { motion } from 'framer-motion'
-import { generateFormalPDF } from '@/utils/pdfExport'
+import { generateFormalPDF, formatPrintDate } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
 
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4', '#f97316']
@@ -47,44 +47,22 @@ export default function LaporanEksportPage() {
         const fetchData = async () => {
             setIsLoading(true)
 
-            // Fetch session and app settings concurrently
-            const [sessionRes, settings] = await Promise.all([
+            // Fetch session, app settings, units, and tickets concurrently
+            const [sessionRes, settings, unitsRes, ticketsRes] = await Promise.all([
                 supabase.auth.getSession(),
-                fetchAppSettings(supabase)
+                fetchAppSettings(supabase),
+                supabase.from('units').select('id, nama').order('nama'),
+                supabase.from('tickets').select('*, units!unit_id(nama)').order('created_at', { ascending: false })
             ])
 
-            let profileUnitId = null
-            let role = 'user'
             const session = sessionRes.data?.session
             if (session) {
                 const { data: profile } = await supabase.from('profiles').select('role, unit_id').eq('id', session.user.id).single()
                 if (profile) {
-                    role = profile.role
-                    setUserRole(role)
-                    if (role === 'user') {
-                        profileUnitId = profile.unit_id
-                        setUserUnitId(profile.unit_id)
-                        setFilterUnit(profile.unit_id || 'Semua')
-                    }
+                    setUserRole(profile.role)
+                    setUserUnitId(profile.unit_id)
                 }
             }
-
-            // 1. Fetch available units
-            let unitQuery = supabase.from('units').select('id, nama').order('nama')
-            if (role === 'user' && profileUnitId) {
-                unitQuery = unitQuery.eq('id', profileUnitId)
-            }
-
-            // 3. Fetch all tickets
-            let ticketQuery = supabase.from('tickets').select('*, units!unit_id(nama)').order('created_at', { ascending: false })
-            if (role === 'user' && profileUnitId) {
-                ticketQuery = ticketQuery.eq('unit_id', profileUnitId)
-            }
-
-            const [unitsRes, ticketsRes] = await Promise.all([
-                unitQuery,
-                ticketQuery
-            ])
 
             if (unitsRes.data) setUnits(unitsRes.data)
 
@@ -106,7 +84,7 @@ export default function LaporanEksportPage() {
                     id_raw: d.id,
                     no: i + 1,
                     id_tiket: d.tracking_number,
-                    tanggal: new Date(d.created_at).toLocaleDateString('id-ID'),
+                    tanggal: formatPrintDate(d.created_at),
                     raw_date: d.created_at,
                     pengirim: d.data_payload?.nama || 'Anonim',
                     kategori: d.jenis ? d.jenis.replace('_', ' ').toUpperCase() : 'LAYANAN',
@@ -130,11 +108,16 @@ export default function LaporanEksportPage() {
             let matchUnit = true
             let matchJenis = true
 
-            if (dateRange.start && dateRange.end) {
-                const ticketDate = new Date(t.raw_date).getTime()
-                const sDate = new Date(dateRange.start).getTime()
-                const eDate = new Date(dateRange.end).getTime() + (24 * 60 * 60 * 1000)
-                if (ticketDate < sDate || ticketDate > eDate) matchDate = false
+            if (dateRange.start) {
+                const s = new Date(dateRange.start)
+                s.setHours(0, 0, 0, 0)
+                if (new Date(t.raw_date) < s) matchDate = false
+            }
+
+            if (dateRange.end) {
+                const e = new Date(dateRange.end)
+                e.setHours(23, 59, 59, 999)
+                if (new Date(t.raw_date) > e) matchDate = false
             }
 
             if (filterUnit !== 'Semua' && t.unit_id !== filterUnit) matchUnit = false
@@ -194,7 +177,13 @@ export default function LaporanEksportPage() {
         try {
             const xlsx = await import('xlsx')
             const worksheet = xlsx.utils.json_to_sheet([])
-            const periodeText = dateRange.start ? `${dateRange.start} s/d ${dateRange.end || 'Sekarang'}` : 'Seluruh Riwayat'
+            const periodeText = (dateRange.start && dateRange.end)
+                ? `${formatPrintDate(dateRange.start)} s/d ${formatPrintDate(dateRange.end)}`
+                : dateRange.start
+                    ? `Mulai ${formatPrintDate(dateRange.start)}`
+                    : dateRange.end
+                        ? `Hingga ${formatPrintDate(dateRange.end)}`
+                        : 'Seluruh Riwayat'
             const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
 
             // 1. KOP SURAT FORMAL & INFORMASI RESMI
@@ -205,7 +194,7 @@ export default function LaporanEksportPage() {
                 [],
                 ['LAPORAN REKAPITULASI LAYANAN, PENGADUAN, DAN SURVEI (EKSEKUTIF)'],
                 [`Periode: ${periodeText} | Unit: ${unitText} | Kategori: ${filterJenis}`],
-                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+                [`Tanggal Cetak: ${formatPrintDate(printDate)}`],
                 [`Penanggung Jawab: ${signerName} (${signerRole})`],
                 [],
                 ['RINGKASAN METRIK KINERJA LAYANAN:'],
@@ -285,7 +274,13 @@ export default function LaporanEksportPage() {
     const handleExportPDF = async () => {
         setIsGenerating(true)
         try {
-            const periodeText = dateRange.start ? `${dateRange.start} s/d ${dateRange.end || 'Sekarang'}` : 'Seluruh Riwayat'
+            const periodeText = (dateRange.start && dateRange.end)
+                ? `${formatPrintDate(dateRange.start)} s/d ${formatPrintDate(dateRange.end)}`
+                : dateRange.start
+                    ? `Mulai ${formatPrintDate(dateRange.start)}`
+                    : dateRange.end
+                        ? `Hingga ${formatPrintDate(dateRange.end)}`
+                        : 'Seluruh Riwayat'
             const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
 
             // Ranking Table
@@ -454,10 +449,9 @@ export default function LaporanEksportPage() {
                         <select
                             value={filterUnit}
                             onChange={(e) => setFilterUnit(e.target.value)}
-                            disabled={userRole === 'user'}
-                            className="w-full px-3 py-2 bg-slate-50 text-slate-900 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none disabled:opacity-60"
+                            className="w-full px-3 py-2 bg-slate-50 text-slate-900 border border-slate-200 rounded-xl text-xs font-bold focus:ring-2 focus:ring-emerald-500/20 outline-none"
                         >
-                            {userRole !== 'user' && <option value="Semua">Semua Unit Kerja</option>}
+                            <option value="Semua">Semua Unit Kerja</option>
                             {units.map(u => (
                                 <option key={u.id} value={u.id}>{u.nama}</option>
                             ))}
@@ -481,6 +475,28 @@ export default function LaporanEksportPage() {
                         </select>
                     </div>
                 </div>
+
+                {/* Filter info indicator & Reset */}
+                {(dateRange.start || dateRange.end || filterUnit !== 'Semua' || filterJenis !== 'Semua') && (
+                    <div className="flex items-center justify-between pt-1">
+                        <div className="text-[11px] font-bold text-slate-500 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                            <span>Filter Aktif: Menampilkan <b>{totalCount}</b> berkas</span>
+                        </div>
+                        <button
+                            onClick={() => {
+                                setDateRange({ start: '', end: '' })
+                                setFilterUnit('Semua')
+                                setFilterJenis('Semua')
+                            }}
+                            className="px-2.5 py-1 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-all flex items-center gap-1"
+                            title="Reset seluruh filter"
+                        >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Reset Filter</span>
+                        </button>
+                    </div>
+                )}
 
                 {/* Print Configuration Metadata */}
                 <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row gap-3 items-center text-xs">

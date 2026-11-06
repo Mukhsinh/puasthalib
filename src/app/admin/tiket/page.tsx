@@ -21,11 +21,12 @@ import {
     ChevronRight,
     Building2,
     Sparkles,
-    Check
+    Check,
+    Calendar
 } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { cn } from '@/utils/cn'
-import { generateFormalPDF } from '@/utils/pdfExport'
+import { generateFormalPDF, formatPrintDate } from '@/utils/pdfExport'
 import { fetchAppSettings } from '@/utils/appSettings'
 
 export default function AdminTiketPage() {
@@ -45,6 +46,7 @@ export default function AdminTiketPage() {
     const [searchQuery, setSearchQuery] = useState('')
     const [statusFilter, setStatusFilter] = useState('Semua')
     const [filterUnit, setFilterUnit] = useState('Semua')
+    const [dateRange, setDateRange] = useState({ start: '', end: '' })
 
     const [actionForm, setActionForm] = useState({
         actionType: 'respon',
@@ -216,6 +218,13 @@ export default function AdminTiketPage() {
         try {
             const xlsx = await import('xlsx')
             const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
+            const periodeText = (dateRange.start && dateRange.end)
+                ? `${formatPrintDate(dateRange.start)} s/d ${formatPrintDate(dateRange.end)}`
+                : dateRange.start
+                    ? `Mulai ${formatPrintDate(dateRange.start)}`
+                    : dateRange.end
+                        ? `Hingga ${formatPrintDate(dateRange.end)}`
+                        : 'Seluruh Riwayat'
             const exportData = filteredTickets
 
             const worksheetData = exportData.map((t, index) => {
@@ -244,8 +253,8 @@ export default function AdminTiketPage() {
                 [`${appSettings.kop_alamat} | ${appSettings.kop_kontak}`],
                 [],
                 ['LAPORAN REKAPITULASI MANAJEMEN TIKET & PENGADUAN LAYANAN'],
-                [`Unit Kerja: ${unitText} | Status: ${statusFilter}`],
-                [`Tanggal Cetak: ${new Date(printDate).toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' })}`],
+                [`Unit Kerja: ${unitText} | Status: ${statusFilter} | Periode: ${periodeText}`],
+                [`Tanggal Cetak: ${formatPrintDate(printDate)}`],
                 [`Penanggung Jawab: ${signerName} (${signerRole})`],
                 [],
                 [`Total Berkas: ${exportData.length} Tiket | Selesai: ${exportData.filter(x => x.status === 'Selesai').length} Tiket`],
@@ -281,6 +290,13 @@ export default function AdminTiketPage() {
         setIsGenerating(true)
         try {
             const unitText = filterUnit === 'Semua' ? 'Seluruh Unit Kerja' : units.find(u => u.id === filterUnit)?.nama || filterUnit
+            const periodeText = (dateRange.start && dateRange.end)
+                ? `${formatPrintDate(dateRange.start)} s/d ${formatPrintDate(dateRange.end)}`
+                : dateRange.start
+                    ? `Mulai ${formatPrintDate(dateRange.start)}`
+                    : dateRange.end
+                        ? `Hingga ${formatPrintDate(dateRange.end)}`
+                        : 'Seluruh Riwayat'
             const exportData = filteredTickets
             const totalT = exportData.length
             const selesaiT = exportData.filter(x => x.status === 'Selesai').length
@@ -305,7 +321,7 @@ export default function AdminTiketPage() {
 
             await generateFormalPDF({
                 title: 'LAPORAN REKAPITULASI PENANGANAN TIKET LAYANAN',
-                subtitle: `Unit Kerja: ${unitText} • Status Filter: ${statusFilter} • Evaluasi Real-Time`,
+                subtitle: `Unit Kerja: ${unitText} • Periode: ${periodeText} • Status Filter: ${statusFilter} • Evaluasi Real-Time`,
                 documentNumber: `PUAS/TKT/${new Date().getFullYear()}/${(new Date().getMonth() + 1).toString().padStart(2, '0')}/${Math.floor(Math.random() * 900 + 100)}`,
                 filename: `Laporan_Tiket_${unitText.replace(/[^a-zA-Z0-9]/g, '_')}_${new Date().toISOString().slice(0, 10)}.pdf`,
                 appSettings,
@@ -332,7 +348,7 @@ export default function AdminTiketPage() {
                 narrativeIntro: [
                     'I. RINGKASAN EKSEKUTIF PENANGANAN TIKET',
                     `Laporan ini menyajikan rekapitulasi penanganan seluruh tiket layanan, permohonan informasi, dan aduan masyarakat pada lingkungan ${unitText} di ${appSettings.kop_rs}.`,
-                    `Berdasarkan data operasional, tercatat sebanyak ${totalT} berkas laporan masuk, dengan rincian ${selesaiT} tiket telah berhasil diselesaikan (${resolusiPct}%), ${prosesT} tiket dalam proses penanganan oleh unit terkait, dan ${tungguT} tiket dalam antrean awal.`,
+                    `Berdasarkan data operasional, tercatat sebanyak ${totalT} berkas laporan masuk (Periode: ${periodeText}), dengan rincian ${selesaiT} tiket telah berhasil diselesaikan (${resolusiPct}%), ${prosesT} tiket dalam proses penanganan oleh unit terkait, dan ${tungguT} tiket dalam antrean awal.`,
                     '',
                     'II. TABULASI RINCI BERKAS TIKET LAYANAN:'
                 ],
@@ -346,7 +362,7 @@ export default function AdminTiketPage() {
         }
     }
 
-    // Filter tickets based on status tab, unit filter & search query (Memoized)
+    // Filter tickets based on status tab, unit filter, date range & search query (Memoized)
     const filteredTickets = useMemo(() => {
         return tickets.filter(t => {
             const matchesStatus = statusFilter === 'Semua' ? true :
@@ -356,8 +372,24 @@ export default function AdminTiketPage() {
 
             const matchesUnit = filterUnit === 'Semua' ? true : t.unit_id === filterUnit
 
+            let matchesDate = true
+            if (dateRange.start && dateRange.end) {
+                const ticketTime = new Date(t.created_at).getTime()
+                const startTime = new Date(dateRange.start + 'T00:00:00').getTime()
+                const endTime = new Date(dateRange.end + 'T23:59:59.999').getTime()
+                matchesDate = ticketTime >= startTime && ticketTime <= endTime
+            } else if (dateRange.start) {
+                const ticketTime = new Date(t.created_at).getTime()
+                const startTime = new Date(dateRange.start + 'T00:00:00').getTime()
+                matchesDate = ticketTime >= startTime
+            } else if (dateRange.end) {
+                const ticketTime = new Date(t.created_at).getTime()
+                const endTime = new Date(dateRange.end + 'T23:59:59.999').getTime()
+                matchesDate = ticketTime <= endTime
+            }
+
             const q = searchQuery.toLowerCase().trim()
-            if (!q) return matchesStatus && matchesUnit
+            if (!q) return matchesStatus && matchesUnit && matchesDate
 
             const reporterName = (t.data_pelapor?.nama || t.data_payload?.nama || '').toLowerCase()
             const trackingNum = (t.tracking_number || '').toLowerCase()
@@ -366,15 +398,29 @@ export default function AdminTiketPage() {
 
             const matchesSearch = trackingNum.includes(q) || reporterName.includes(q) || unitName.includes(q) || jenisName.includes(q)
 
-            return matchesStatus && matchesUnit && matchesSearch
-        })
-    }, [tickets, statusFilter, filterUnit, searchQuery])
+            return matchesStatus && matchesUnit && matchesDate && matchesSearch
+        }).sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+    }, [tickets, statusFilter, filterUnit, dateRange, searchQuery])
 
-    // Memoize status counts in single pass
+    // Memoize status counts in single pass based on active unit and date range filters
     const statusCounts = useMemo(() => {
         let baseList = tickets
         if (filterUnit !== 'Semua') {
-            baseList = tickets.filter(t => t.unit_id === filterUnit)
+            baseList = baseList.filter(t => t.unit_id === filterUnit)
+        }
+        if (dateRange.start || dateRange.end) {
+            baseList = baseList.filter(t => {
+                const ticketTime = new Date(t.created_at).getTime()
+                if (dateRange.start && dateRange.end) {
+                    return ticketTime >= new Date(dateRange.start + 'T00:00:00').getTime() &&
+                           ticketTime <= new Date(dateRange.end + 'T23:59:59.999').getTime()
+                } else if (dateRange.start) {
+                    return ticketTime >= new Date(dateRange.start + 'T00:00:00').getTime()
+                } else if (dateRange.end) {
+                    return ticketTime <= new Date(dateRange.end + 'T23:59:59.999').getTime()
+                }
+                return true
+            })
         }
         const counts: Record<string, number> = {
             Semua: baseList.length,
@@ -388,7 +434,7 @@ export default function AdminTiketPage() {
             else if (t.status === 'Selesai') counts.Selesai++
         })
         return counts
-    }, [tickets, filterUnit])
+    }, [tickets, filterUnit, dateRange])
 
     const countStatus = (status: string) => statusCounts[status] ?? 0
 
@@ -522,6 +568,36 @@ export default function AdminTiketPage() {
                                 <option key={u.id} value={u.id}>{u.nama}</option>
                             ))}
                         </select>
+                    </div>
+
+                    {/* Filter Range Tanggal: Default seluruh tiket, urutan terbaru di atas */}
+                    <div className="flex items-center gap-2 bg-white border border-slate-200 px-3 py-1.5 rounded-2xl shadow-xs">
+                        <Calendar className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                        <span className="text-[11px] font-bold text-slate-500">Dari:</span>
+                        <input
+                            type="date"
+                            value={dateRange.start}
+                            onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                            className="bg-transparent text-xs font-bold text-slate-800 outline-none w-28 cursor-pointer"
+                            title="Filter dari tanggal"
+                        />
+                        <span className="text-[11px] font-bold text-slate-500">s/d:</span>
+                        <input
+                            type="date"
+                            value={dateRange.end}
+                            onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                            className="bg-transparent text-xs font-bold text-slate-800 outline-none w-28 cursor-pointer"
+                            title="Filter sampai tanggal"
+                        />
+                        {(dateRange.start || dateRange.end) && (
+                            <button
+                                onClick={() => setDateRange({ start: '', end: '' })}
+                                title="Reset filter tanggal (tampilkan seluruh)"
+                                className="text-slate-400 hover:text-rose-500 ml-1 p-0.5 rounded-full hover:bg-slate-100 transition-all"
+                            >
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
                     </div>
                 </div>
 
