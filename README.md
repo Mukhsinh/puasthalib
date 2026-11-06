@@ -1,37 +1,72 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# PUAS (Kanal Aduan, Survey, dan Informasi Terintegrasi)
+> **Platform Pelayanan Terpadu Rumah Sakit Umum Daerah Bendan / Fasilitas Pelayanan Publik**
 
-## Getting Started
+Aplikasi modern berbasis web untuk mengelola pengaduan pasien, pengukuran survei kepuasan masyarakat (IKM Permenpan RB No. 14 Tahun 2017), keterbukaan permohonan informasi publik (UU KIP), dan whistleblowing internal yang terintegrasi secara *real-time*.
 
-First, run the development server:
+---
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 📑 Dokumentasi Resmi
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Dokumentasi teknis komprehensif, arsitektur sistem, skema basis data, modul aplikasi, flowchart standar ANSI/ISO, dan formulasi matematis IKM dapat dibaca pada:
+👉 **[DOKUMENTASI_LENGKAP.md](./DOKUMENTASI_LENGKAP.md)**
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+---
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## 🚀 Fitur Unggulan
 
-## Learn More
+### 🌐 Kanal Publik (Pasien & Pengunjung)
+- **Beranda Terintegrasi (`/`)**: Navigasi cepat, jadwal sholat lokal real-time, FAQ interaktif, ulasan testimoni marquee.
+- **Survei Kepuasan Masyarakat (`/survei`)**: 11 Unsur Indikator Pelayanan Standar Permenpan RB No. 14/2017 & demografi responden.
+- **Formulir Pengaduan / Komplain (`/komplain`)**: Form 5 tahap terstruktur, penomoran tiket unik (`KOM-xxxxx`), dan harapan solusi pasien.
+- **Permintaan Informasi Publik (`/informasi`)**: Standar Formulir Permintaan Informasi Rumah Sakit (FPI-RS) UU KIP dengan SLA 1x24 jam kerja.
+- **Whistleblowing Internal (`/aduan-internal`)**: Saluran tertutup bagi staf RS dengan opsi pelapor anonim.
+- **Lacak Status Tiket (`/lacak`)**: Pengecekan status pengerjaan tiket dan log riwayat tindak lanjut secara transparan.
 
-To learn more about Next.js, take a look at the following resources:
+### 🛡️ Backoffice Administrator (`/admin`)
+- **Keamanan Sesi (`/login`)**: Opsi *Stay Signed In* (30 hari) vs *Auto-timeout* inaktivitas 30 menit, toggle lihat password.
+- **Dashboard Eksekutif (`/admin`)**: Metrik KPI tiket, rasio status penyelesaian, grafik tren waktu, notifikasi real-time.
+- **Manajemen Tiket (`/admin/tiket`)**: Filter per unit kerja, detail komplain, update status, dan ekspor laporan resmi (PDF ber-cover + Excel).
+- **Analisa Pelaporan (`/admin/analisa`)**: Tren volume laporan, rasio kategori aduan, dan komparasi performa.
+- **Analisis Kepuasan (`/admin/analisis-kepuasan`)**: Skor IKM Global, Predikat Mutu (A/B/C/D), speedometer gauge 11 unsur $U_1$ s.d. $U_{11}$, ekspor SKM Permenpan RB.
+- **Master Unit Kerja (`/admin/unit`)**: Manajemen poliklinik & ruangan, unduh template excel, impor batch data excel cerdas.
+- **Master QR Code (`/admin/qrcode`)**: Generator QR unit untuk 4 mode (Gabungan, Survei, Komplain, Informasi), ekspor PNG HD, cetak kartu akrilik stand meja loket (PDF). Saat dipindai, unit otomatis terkunci (*lock unit*).
+- **Pengaturan & Buku Panduan (`/admin/pengaturan`)**: Konfigurasi identitas RS, backup database, generator PDF Buku Pedoman Teknis & Flowchart ANSI/ISO.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## 🛠️ Tumpukan Teknologi (Tech Stack)
 
-## Deploy on Vercel
+- **Framework**: Next.js 16 (App Router), React 19, TypeScript
+- **Styling & Animasi**: Tailwind CSS v4, Framer Motion, Lucide Icons
+- **Visualisasi & Diagram**: Recharts, SVG Speedometer Gauge
+- **Backend & Database**: Supabase (PostgreSQL, Supabase Auth SSR, RLS, Realtime)
+- **Ekspor Dokumen**: jsPDF, jsPDF-AutoTable, XLSX (SheetJS), QRCode, HTML2Canvas
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+---
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
-# aplikasi-komplain
+## ⚡ Memulai Pengembangan
+
+1. **Prasyarat**: Node.js 18+ terpasang di komputer Anda.
+2. **Setup Konfigurasi**:
+   Pastikan file `.env.local` telah terkonfigurasi:
+   ```env
+   NEXT_PUBLIC_SUPABASE_URL=https://[YOUR_SUPABASE_ID].supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=[YOUR_ANON_KEY]
+   ```
+3. **Instalasi Paket**:
+   ```bash
+   npm install
+   ```
+4. **Menjalankan Server Lokal**:
+   ```bash
+   npm run dev
+   ```
+   Buka [http://localhost:3000](http://localhost:3000) pada browser Anda.
+5. **Kompilasi Versi Produksi**:
+   ```bash
+   npm run build
+   npm start
+   ```
+
+---
+*Pengembangan Sistem PUAS - Solusi Pelayanan Terpadu & Akuntabel.*
